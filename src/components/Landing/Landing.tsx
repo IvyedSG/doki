@@ -46,13 +46,11 @@ export const Landing: React.FC = () => {
           Subí tu trabajo y nosotros nos encargamos del formato.
         </p>
 
-        <div className="w-12 h-px bg-border-main my-12 relative" />
-
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
           onClick={handleClick}
-          className="w-full border border-dashed border-border-active hover:border-accent bg-bg2/30 rounded-sm px-12 py-24 text-center cursor-pointer transition-all duration-200 group relative"
+          className="w-full bg-bg2/30 hover:bg-bg3 rounded-sm px-12 py-24 text-center cursor-pointer transition-all duration-200 group relative mt-12"
         >
           <input ref={inputRef} type="file" accept=".docx,.txt,.md"
             className="hidden" onChange={handleInputChange}
@@ -67,7 +65,7 @@ export const Landing: React.FC = () => {
         </div>
 
         <button onClick={loadDemo}
-          className="text-label text-text-muted hover:text-accent transition-colors underline underline-offset-4 decoration-border-active hover:decoration-accent mt-12 relative"
+          className="text-label text-text-muted hover:text-accent transition-colors underline underline-offset-4 decoration-border-active hover:decoration-accent mt-10 relative"
         >
           Cargar documento de demostración
         </button>

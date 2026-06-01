@@ -49,28 +49,6 @@
   display: block;
 }
 
-@utility sidebar-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-rad);
-  font-size: var(--text-body);
-  transition: all 0.15s ease;
-  white-space: nowrap;
-  width: 100%;
-}
-
-@utility sidebar-btn-collapsed {
-  gap: 0;
-  padding: var(--spacing-2) 0;
-}
-
-@utility sidebar-btn-expanded {
-  gap: var(--spacing-2);
-  padding: var(--spacing-3) var(--spacing-4);
-}
-
 html {
   font-size: 18px;
 }
@@ -87,6 +65,23 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #444;
 }
 
 .step-pip {
