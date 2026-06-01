@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #0f0f0f;
+  --color-bg2: #161616;
+  --color-bg3: #1e1e1e;
+  --color-bg4: #262626;
+
+  --color-border-main: #2a2a2a;
+  --color-border-active: #333333;
+
+  --color-text-main: #e8e6df;
+  --color-text-muted: #888888;
+  --color-text-hint: #555555;
+
+  --color-accent: #c8f07a;
+  --color-accent-hover: #a8d456;
+
+  --color-info: #5b9cf6;
+  --color-warn: #f0a050;
+  --color-danger: #e05555;
+  --color-teal: #4ecba8;
+
+  --font-mono: 'DM Mono', monospace;
+
+  --radius-rad: 8px;
+  --radius-rad-lg: 12px;
+  --radius-rad-xl: 16px;
+
+  --text-body: 1.25rem;
+  --text-body--line-height: 1.625;
+
+  --text-label: 1rem;
+  --text-label--line-height: 1.5;
+  --text-label--font-weight: 500;
+  --text-label--letter-spacing: 0.12em;
+}
+
+@utility font-mono {
+  font-family: var(--font-mono);
+}
+
+@utility label-section {
+  font-size: var(--text-label);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-hint);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  display: block;
+}
+
+@utility sidebar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-rad);
+  font-size: var(--text-body);
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  width: 100%;
+}
+
+@utility sidebar-btn-collapsed {
+  gap: 0;
+  padding: var(--spacing-2) 0;
+}
+
+@utility sidebar-btn-expanded {
+  gap: var(--spacing-2);
+  padding: var(--spacing-3) var(--spacing-4);
+}
+
+html {
+  font-size: 18px;
+}
+
+body {
+  font-family: var(--font-mono);
+  background-color: #0f0f0f;
+  color: #e8e6df;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  user-select: none;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.step-pip {
+  height: 4px;
+  flex: 1;
+  border-radius: 2px;
+  background: #262626;
+  transition: all 0.3s ease;
+}
+.step-pip.active {
+  background: #c8f07a;
+  opacity: 0.5;
+}
+.step-pip.done {
+  background: #c8f07a;
+}
