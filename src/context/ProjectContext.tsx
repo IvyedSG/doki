@@ -14,10 +14,14 @@ export interface ProjectConfig {
 interface ProjectContextType {
   config: ProjectConfig;
   updateConfig: (newConfig: Partial<ProjectConfig>) => void;
+  showWizard: boolean;
+  setShowWizard: (active: boolean) => void;
   inWorkspace: boolean;
   setInWorkspace: (active: boolean) => void;
   fileName: string | null;
   setFileName: (name: string | null) => void;
+  documentText: string | null;
+  setDocumentText: (text: string | null) => void;
   resetProject: () => void;
 }
 
@@ -32,8 +36,10 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
 export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<ProjectConfig>(defaultConfig);
+  const [showWizard, setShowWizard] = useState(false);
   const [inWorkspace, setInWorkspace] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [documentText, setDocumentText] = useState<string | null>(null);
 
   const updateConfig = (newConfig: Partial<ProjectConfig>) => {
     setConfig((prev) => ({ ...prev, ...newConfig }));
@@ -41,8 +47,10 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const resetProject = () => {
     setConfig(defaultConfig);
+    setShowWizard(false);
     setInWorkspace(false);
     setFileName(null);
+    setDocumentText(null);
   };
 
   return (
@@ -50,10 +58,14 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       value={{
         config,
         updateConfig,
+        showWizard,
+        setShowWizard,
         inWorkspace,
         setInWorkspace,
         fileName,
         setFileName,
+        documentText,
+        setDocumentText,
         resetProject,
       }}
     >

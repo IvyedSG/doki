@@ -1,10 +1,13 @@
 import React from "react";
 import { useProject } from "../../context/ProjectContext";
+import { useHealthCheck } from "../../services/health";
 import {
   IconHome,
   IconFolder,
   IconSettings,
   IconFileText,
+  IconCpu,
+  IconLock,
 } from "@tabler/icons-react";
 import logoSource from "../../assets/doki_source_logo.png";
 
@@ -14,18 +17,20 @@ interface AppShellProps {
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const { inWorkspace, setInWorkspace, fileName } = useProject();
+  const health = useHealthCheck();
+
+  const statusColor = health.ok ? health.color : "bg-danger";
+  const statusText = health.ok ? health.mensaje : "Desconectado";
 
   return (
     <div className="flex h-screen bg-bg font-mono text-body text-text-main antialiased select-none overflow-hidden">
 
-      {/* SIDEBAR - Fixed icons (Claude style) */}
+      {/* SIDEBAR */}
       <aside className="w-14 bg-bg2 border-r border-border-main flex flex-col items-center py-4 shrink-0">
-        {/* Logo */}
         <div className="mb-6">
           <img src={logoSource} alt="Doki" className="w-7 h-7" />
         </div>
 
-        {/* Primary nav */}
         <nav className="flex flex-col items-center gap-3 flex-1">
           <button
             onClick={() => setInWorkspace(false)}
@@ -47,7 +52,6 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           </button>
         </nav>
 
-        {/* Bottom section */}
         <div className="flex flex-col items-center">
           <button
             title="Configuración"
@@ -70,6 +74,22 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
         )}
         <div className="flex-1 overflow-hidden">
           {children}
+        </div>
+
+        {/* Bottom bar — status */}
+        <div className="h-7 bg-bg2 border-t border-border-main flex items-center gap-4 px-4 shrink-0">
+          <div className="flex items-center gap-2">
+            <span className={`w-1.5 h-1.5 rounded-full ${statusColor} ${!health.modeloListo && health.ok ? "animate-pulse" : ""}`} />
+            <span className="text-[10px] text-text-hint">{statusText}</span>
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            <span className="text-[10px] text-text-hint flex items-center gap-1">
+              <IconCpu size={10} /> Local
+            </span>
+            <span className="text-[10px] text-text-hint flex items-center gap-1">
+              <IconLock size={10} /> Offline
+            </span>
+          </div>
         </div>
       </div>
     </div>

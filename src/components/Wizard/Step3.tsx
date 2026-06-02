@@ -1,58 +1,108 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useProject } from "../../context/ProjectContext";
+import { api } from "../../services/api";
 
 interface Step3Props {
   isInitializing: boolean;
   onFinishInit: () => void;
 }
 
+interface LogEntry {
+  text: string;
+  ok?: boolean;
+}
+
+const ALL_LOGOS: string[] = [
+  "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏",
+];
+
 export const Step3: React.FC<Step3Props> = ({ isInitializing, onFinishInit }) => {
-  const { config } = useProject();
-  const [logs, setLogs] = useState<string[]>([]);
+  const { config, documentText } = useProject();
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [done, setDone] = useState(false);
+  const [spinner, setSpinner] = useState(0);
 
   useEffect(() => {
-    if (isInitializing) {
-      const terminalLogs = [
-        "Estableciendo canal IPC local nativo...",
-        "Scaffolding de metadatos de usuario en caliente...",
-        "Creando archivo de configuración 'project.md'...",
-        "Vinculando perfil formativo académico de Vygotsky...",
-        "Estableciendo pesos del instrumento didáctico...",
-        "Cargando reglas y normas académicas locales offline...",
-        "Instanciando Small Language Model local...",
-        "Doki inicializado con éxito. Entorno de análisis listo."
-      ];
+    if (done) return;
+    const t = setInterval(() => setSpinner((s) => (s + 1) % ALL_LOGOS.length), 120);
+    return () => clearInterval(t);
+  }, [done]);
 
-      let currentLogIdx = 0;
-      setLogs([terminalLogs[0]]);
+  const addLog = useCallback((text: string, ok?: boolean) => {
+    setLogs((prev) => [...prev, { text, ok }]);
+  }, []);
 
-      const interval = setInterval(() => {
-        currentLogIdx++;
-        if (currentLogIdx < terminalLogs.length) {
-          setLogs((prev) => [...prev, terminalLogs[currentLogIdx]]);
-        } else {
-          clearInterval(interval);
-          setTimeout(() => {
-            onFinishInit();
-          }, 800);
+  useEffect(() => {
+    if (!isInitializing) return;
+    let cancelled = false;
+
+    const run = async () => {
+      addLog("Verificando conexión con el backend...");
+      try {
+        const salud = await api.salud();
+        if (cancelled) return;
+        if (salud.estado === "error") {
+          addLog("Error: backend no disponible. Ejecutá ./dev.sh primero.", false);
+          setTimeout(() => onFinishInit(), 2000);
+          return;
         }
-      }, 400);
+        addLog("Backend conectado. Reglas cargadas.");
+      } catch {
+        addLog("Error: no se pudo conectar con el backend.", false);
+        setTimeout(() => onFinishInit(), 2000);
+        return;
+      }
 
-      return () => clearInterval(interval);
-    }
-  }, [isInitializing, onFinishInit]);
+      if (documentText) {
+        addLog("Detectando tipo de documento, normativa y carrera...");
+        try {
+          const det = await api.detectarParametros({ texto: documentText.slice(0, 3000) });
+          if (cancelled) return;
+
+          if (det.tipo_doc && det.tipo_doc !== "no_claro") {
+            addLog(`→ Tipo detectado: ${det.tipo_doc} (confianza: ${Math.round((det.confianza_tipo_doc ?? 0) * 100)}%)`);
+            if (det.tipo_doc !== config.docType) {
+              addLog("  ⚠ difiere de tu selección. Podés cambiarlo en el paso 1.");
+            }
+          }
+          if (det.normativa && det.normativa !== "no_claro") {
+            addLog(`→ Normativa detectada: ${det.normativa}`);
+          }
+          if (det.carrera && det.carrera !== "no_claro") {
+            addLog(`→ Carrera detectada: ${det.carrera}`);
+          }
+        } catch {
+          addLog("Detección automática no disponible (el modelo no responde).");
+        }
+      }
+
+      addLog("Preparando entorno de análisis...");
+      addLog("Doki listo. Entorno de análisis inicializado.", true);
+      setDone(true);
+      setTimeout(() => {
+        if (!cancelled) onFinishInit();
+      }, 600);
+    };
+
+    run();
+    return () => { cancelled = true; };
+  }, [isInitializing, documentText, addLog, onFinishInit, config.docType]);
 
   if (isInitializing) {
     return (
       <div className="flex flex-col items-center">
         <div className="animate-spin rounded-full h-8 w-8 border-2 border-accent border-t-transparent mb-6"></div>
-        <h2 className="text-xs font-bold tracking-widest text-text-main mb-4 uppercase">Inicializando Entorno</h2>
+        <h2 className="text-xs font-bold tracking-widest text-text-main mb-4 uppercase">
+          {done ? "Listo" : "Inicializando Entorno"}
+        </h2>
         <div className="w-full bg-bg3 border border-border-main rounded-rad p-5 text-[11px] text-text-muted min-h-48 flex flex-col gap-2.5 overflow-y-auto leading-relaxed text-left font-mono">
           {logs.map((log, idx) => (
             <div key={idx} className="flex gap-2 items-start">
-              <span className="text-accent shrink-0">$</span>
-              <span>{log}</span>
-              {idx === logs.length - 1 && <span className="animate-ping text-accent">|</span>}
+              <span className={`shrink-0 ${log.ok === false ? "text-danger" : log.ok === true ? "text-teal" : "text-accent"}`}>
+                {log.ok === false ? "✗" : log.ok === true ? "✓" : ALL_LOGOS[spinner]}
+              </span>
+              <span>{log.text}</span>
+              {idx === logs.length - 1 && !done && <span className="animate-ping text-accent">|</span>}
             </div>
           ))}
         </div>
@@ -82,7 +132,7 @@ export const Step3: React.FC<Step3Props> = ({ isInitializing, onFinishInit }) =>
         </div>
       </div>
       <p className="text-[10px] text-text-hint border-t border-border-main pt-3 mt-1.5 leading-relaxed italic">
-        Al hacer clic en 'Inicializar', Doki creará el archivo 'project.md' en el sistema local para fijar la contextualización offline.
+        Al iniciar, Doki detectará automáticamente los parámetros de tu documento y preparará el entorno de análisis.
       </p>
     </div>
   );
