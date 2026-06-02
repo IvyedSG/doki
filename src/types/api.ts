@@ -1,105 +1,42 @@
-export type Dimension = "organizacion" | "coherencia" | "gramatica";
+/**
+ * Tipos de la API — GENERADOS desde el contrato del back (doki-be).
+ *
+ * Las definiciones reales viven en `api-gen.ts` (auto-generado con `openapi-typescript` desde
+ * http://localhost:8010/openapi.json). Este archivo solo re-exporta con nombres planos para que
+ * el resto del front siga importando `{ Sugerencia, AnalizarRequest, ... }` sin cambios.
+ *
+ * ⚠️ NO edites los tipos del back a mano. Cuando el back cambie el contrato, corré:
+ *     bun run gen:api
+ * y TypeScript te avisará en `tsc` si algo del front dejó de calzar.
+ */
+import type { components } from "./api-gen";
 
-export type Severidad = "error" | "advertencia" | "sugerencia";
+type S = components["schemas"];
 
-export type Nivel = "palabra" | "oracion" | "parrafo" | "documento";
+// Enums / primitivos
+export type Dimension = S["Dimension"];
+export type Severidad = S["Severidad"];
+export type Nivel = S["Nivel"];
+export type Fuente = S["Fuente"];
+export type Rango = S["Rango"];
+export type Sugerencia = S["Sugerencia"];
+export type SeccionEsperada = S["SeccionEsperada"];
 
-export type Fuente = "reglas" | "pln" | "modelo";
+// Operaciones principales
+export type AnalizarRequest = S["AnalizarRequest"];
+export type AnalizarResponse = S["AnalizarResponse"];
+export type ReescribirRequest = S["ReescribirRequest"];
+export type ReescribirResponse = S["ReescribirResponse"];
+export type EstructuraResponse = S["EstructuraResponse"];
+export type SaludResponse = S["SaludResponse"];
 
+// Asistente
+export type MensajeChat = S["MensajeChat"];
+export type ContextoChat = S["ContextoChat"];
+export type ChatRequest = S["ChatRequest"];
+export type ChatResponse = S["ChatResponse"];
+export type DetectarParametrosRequest = S["DetectarParametrosRequest"];
+export type DetectarParametrosResponse = S["DetectarParametrosResponse"];
+
+// Refinamiento solo-front: el back tipa `estado` como string libre.
 export type EstadoSalud = "ok" | "cargando" | "error";
-
-export interface Rango {
-  inicio: number;
-  fin: number;
-}
-
-export interface Sugerencia {
-  id: string;
-  rf: string;
-  dimension: Dimension;
-  severidad: Severidad;
-  nivel: Nivel;
-  rango: Rango | null;
-  mensaje: string;
-  sugerencia: string | null;
-  fuente: Fuente;
-}
-
-export interface AnalizarRequest {
-  texto: string;
-  tipo_doc?: string;
-  dimensiones?: Dimension[];
-  seed?: number;
-}
-
-export interface AnalizarResponse {
-  sugerencias: Sugerencia[];
-  parcial: boolean;
-  motores_ok: string[];
-  motores_fallidos: string[];
-}
-
-export interface ReescribirRequest {
-  fragmento: string;
-  motivo?: string;
-  seed?: number;
-}
-
-export interface ReescribirResponse {
-  reescritura_formal: string;
-  nota: string;
-}
-
-export interface SaludResponse {
-  estado: EstadoSalud;
-  modelo_listo: boolean;
-  ollama_ok: boolean;
-  reglas_listas: boolean;
-  version: string;
-  ollama_version: string | null;
-  modelo_digest: string | null;
-  pin_ok: boolean;
-}
-
-export interface SeccionEsperada {
-  nombre: string;
-  orden: number;
-  recomendada: boolean;
-}
-
-export interface EstructuraResponse {
-  tipo_doc: string;
-  secciones: SeccionEsperada[];
-}
-
-export interface MensajeChat {
-  rol: "usuario" | "asistente";
-  contenido: string;
-}
-
-export interface ChatRequest {
-  mensaje: string;
-  historial?: MensajeChat[];
-  contexto?: {
-    documento?: string;
-    sugerencia_id?: string;
-    tipo_chat?: "general" | "regla" | "ejemplo" | "pedagogico";
-  };
-}
-
-export interface ChatResponse {
-  respuesta: string;
-}
-
-export interface DetectarParametrosRequest {
-  texto: string;
-}
-
-export interface DetectarParametrosResponse {
-  tipo_doc: string | null;
-  normativa: string | null;
-  carrera: string | null;
-  confianza_tipo_doc: number | null;
-  confianza_normativa: number | null;
-  confianza_carrera: number | null;
-}

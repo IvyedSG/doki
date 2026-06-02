@@ -11,7 +11,8 @@ import type {
   SaludResponse,
 } from "../types/api";
 
-const BASE_URL = "http://localhost:8000";
+const BASE_URL =
+  (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8010";
 
 class ApiError extends Error {
   constructor(
