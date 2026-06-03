@@ -55,6 +55,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/secciones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Detecta las secciones del documento (índice) para analizar por partes */
+        post: operations["secciones"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reescribir": {
         parameters: {
             query?: never;
@@ -123,6 +140,10 @@ export interface components {
             dimensiones?: components["schemas"]["Dimension"][] | null;
             /** Seed */
             seed?: number | null;
+            /** Alcance */
+            alcance?: string | null;
+            /** Offset Base */
+            offset_base?: number | null;
         };
         /** AnalizarResponse */
         AnalizarResponse: {
@@ -143,6 +164,8 @@ export interface components {
              * @default []
              */
             motores_fallidos: string[];
+            /** Nota */
+            nota?: string | null;
         };
         /** ChatRequest */
         ChatRequest: {
@@ -284,6 +307,32 @@ export interface components {
             recomendada: boolean;
         };
         /**
+         * SeccionInfo
+         * @description Una sección detectada por su título, con rango de carácter sobre el texto NFC.
+         */
+        SeccionInfo: {
+            /** Idx */
+            idx: number;
+            /** Titulo */
+            titulo: string;
+            /** Inicio */
+            inicio: number;
+            /** Fin */
+            fin: number;
+            /** N Palabras */
+            n_palabras: number;
+        };
+        /** SeccionesRequest */
+        SeccionesRequest: {
+            /** Texto */
+            texto: string;
+        };
+        /** SeccionesResponse */
+        SeccionesResponse: {
+            /** Secciones */
+            secciones: components["schemas"]["SeccionInfo"][];
+        };
+        /**
          * Severidad
          * @enum {string}
          */
@@ -407,6 +456,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalizarResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    secciones: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SeccionesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeccionesResponse"];
                 };
             };
             /** @description Validation Error */

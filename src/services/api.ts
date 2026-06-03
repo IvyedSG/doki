@@ -9,6 +9,8 @@ import type {
   ReescribirRequest,
   ReescribirResponse,
   SaludResponse,
+  SeccionesRequest,
+  SeccionesResponse,
 } from "../types/api";
 
 const BASE_URL =
@@ -40,15 +42,23 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  salud: () => request<SaludResponse>("/salud"),
+  salud: (signal?: AbortSignal) => request<SaludResponse>("/salud", { signal }),
 
   estructura: (tipo_doc: string) =>
     request<EstructuraResponse>(`/estructura/${encodeURIComponent(tipo_doc)}`),
 
-  analizar: (data: AnalizarRequest) =>
+  analizar: (data: AnalizarRequest, signal?: AbortSignal) =>
     request<AnalizarResponse>("/analizar", {
       method: "POST",
       body: JSON.stringify(data),
+      signal,
+    }),
+
+  secciones: (data: SeccionesRequest, signal?: AbortSignal) =>
+    request<SeccionesResponse>("/secciones", {
+      method: "POST",
+      body: JSON.stringify(data),
+      signal,
     }),
 
   reescribir: (data: ReescribirRequest) =>

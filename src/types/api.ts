@@ -29,6 +29,9 @@ export type ReescribirRequest = S["ReescribirRequest"];
 export type ReescribirResponse = S["ReescribirResponse"];
 export type EstructuraResponse = S["EstructuraResponse"];
 export type SaludResponse = S["SaludResponse"];
+export type SeccionesRequest = S["SeccionesRequest"];
+export type SeccionesResponse = S["SeccionesResponse"];
+export type SeccionInfo = S["SeccionInfo"];
 
 // Asistente
 export type MensajeChat = S["MensajeChat"];

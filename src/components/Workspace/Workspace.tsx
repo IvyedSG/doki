@@ -3,12 +3,13 @@ import { useProject } from "../../context/ProjectContext";
 import { api } from "../../services/api";
 import { mapDocType } from "../../types/mapping";
 import { segmentText } from "../../types/highlights";
-import type { Sugerencia, MensajeChat as Mensaje } from "../../types/api";
+import type { Sugerencia, MensajeChat as Mensaje, Dimension } from "../../types/api";
 import {
   IconArrowUp,
   IconAlertTriangle,
   IconCircleCheck,
   IconDatabaseOff,
+  IconInfoCircle,
   IconHierarchy,
   IconLink,
   IconTypography,
@@ -151,6 +152,7 @@ export const Workspace: React.FC = () => {
   const [sugerencias, setSugerencias] = useState<Sugerencia[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
   const [motoresFallidos, setMotoresFallidos] = useState<string[]>([]);
+  const [nota, setNota] = useState<string | null>(null);
 
   const [dimFilter, setDimFilter] = useState<DimensionFilter>("todas");
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -161,51 +163,115 @@ export const Workspace: React.FC = () => {
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
-  const r1Ref = useRef<Sugerencia[]>([]);
   const [thinkingText, setThinkingText] = useState("");
+  // Progreso del análisis por secciones (intro -> método -> …)
+  const [progreso, setProgreso] = useState<{ total: number; hechas: number; actual: string }>({
+    total: 0,
+    hechas: 0,
+    actual: "",
+  });
 
   useEffect(() => {
     if (!documentText) return;
+    const texto = documentText;
     const tipoDoc = mapDocType(config.docType);
-    setStatus("loading");
-    setThinkingText("Conectando con el backend");
-    r1Ref.current = [];
+    const dims: Dimension[] = ["organizacion", "coherencia"];
+    const ctrl = new AbortController();
+    const signal = ctrl.signal;
+    let cancelado = false;
 
-    api
-      .salud()
-      .then((salud) => {
-        if (salud.estado === "error") throw new Error("El backend no está disponible");
+    const run = async () => {
+      setStatus("loading");
+      setThinkingText("Conectando con el backend");
+      setSugerencias([]);
+      setMotoresFallidos([]);
+      setNota(null);
+      setProgreso({ total: 0, hechas: 0, actual: "" });
+
+      // Acumulamos de TODAS las pasadas con ids únicos del front (los del back se repiten por pasada).
+      const acumulado: Sugerencia[] = [];
+      const fallidos = new Set<string>();
+      let nid = 0;
+      const agregar = (items: Sugerencia[]) => {
+        for (const it of items) acumulado.push({ ...it, id: `s${nid++}` });
+        if (!cancelado) setSugerencias([...acumulado]);
+      };
+      // Publica los motores fallidos a medida que se detectan (no solo al final).
+      const sumarFallidos = (nombres: string[]) => {
+        nombres.forEach((m) => fallidos.add(m));
+        if (!cancelado) setMotoresFallidos([...fallidos]);
+      };
+
+      try {
+        await api.salud(signal); // si el backend no responde, lanza y cae al catch
+        if (cancelado) return;
+
+        // 1) Reglas (ortografía + gramática) sobre TODO el documento.
         setThinkingText("Revisando ortografía y gramática");
-        return api.analizar({ texto: documentText, tipo_doc: tipoDoc, dimensiones: ["gramatica"] });
-      })
-      .then((r1) => {
-        r1Ref.current = r1.sugerencias;
-        setSugerencias(r1.sugerencias);
-        setMotoresFallidos(r1.motores_fallidos);
+        const r1 = await api.analizar({ texto, tipo_doc: tipoDoc, dimensiones: ["gramatica"] }, signal);
+        if (cancelado) return;
+        agregar(r1.sugerencias);
+        sumarFallidos(r1.motores_fallidos);
         setStatus("partial");
-        setThinkingText("Analizando organización y coherencia");
-        return api.analizar({ texto: documentText, tipo_doc: tipoDoc, dimensiones: ["organizacion", "coherencia"] });
-      })
-      .then((r2) => {
-        const idsR1 = new Set(r1Ref.current.map((s) => s.id));
-        const todas = [...r1Ref.current, ...r2.sugerencias.filter((s) => !idsR1.has(s.id))];
-        setSugerencias(todas);
-        setMotoresFallidos((prev) => [...new Set([...prev, ...r2.motores_fallidos])]);
-        const todosFallidos = todas.length === 0 && r2.motores_fallidos.length > 0;
-        if (todosFallidos) {
+
+        // 2) Secciones del documento (por el índice).
+        const { secciones } = await api.secciones({ texto }, signal);
+        if (cancelado) return;
+
+        // 3) Pasada global: estructura, cohesión y conectores (todo el doc).
+        setThinkingText("Analizando estructura y cohesión");
+        const rg = await api.analizar({ texto, tipo_doc: tipoDoc, dimensiones: dims, alcance: "global" }, signal);
+        if (cancelado) return;
+        agregar(rg.sugerencias);
+        sumarFallidos(rg.motores_fallidos);
+
+        // 4) Ideas + flujo POR SECCIÓN, progresivo (intro -> método -> …).
+        if (!cancelado) setProgreso({ total: secciones.length, hechas: 0, actual: "" });
+        for (const sec of secciones) {
+          if (cancelado) return;
+          if (!cancelado) setProgreso((p) => ({ ...p, actual: sec.titulo }));
+          const sub = texto.slice(sec.inicio, sec.fin);
+          try {
+            const rs = await api.analizar(
+              { texto: sub, tipo_doc: tipoDoc, dimensiones: dims, alcance: "seccion", offset_base: sec.inicio },
+              signal,
+            );
+            if (cancelado) return;
+            agregar(rs.sugerencias);
+            sumarFallidos(rs.motores_fallidos);
+          } catch (e) {
+            if (cancelado || (e instanceof DOMException && e.name === "AbortError")) return;
+            // Una sección que falla no tumba el resto del análisis.
+          }
+          if (!cancelado) setProgreso((p) => ({ ...p, hechas: p.hechas + 1 }));
+        }
+
+        if (cancelado) return;
+        if (secciones.length > 1) {
+          setNota(`Análisis por secciones (${secciones.length}): el modelo revisó el documento completo, parte por parte.`);
+        }
+        if (acumulado.length === 0 && fallidos.size > 0) {
           setStatus("error");
           setErrorMsg("Ollama no está disponible. El análisis se limitará a reglas básicas de ortografía y normativa.\nPara análisis completo con IA: https://ollama.com");
         } else {
           setStatus("success");
-          setMessages([{ rol: "asistente", contenido: buildResumen(todas) }]);
+          setMessages([{ rol: "asistente", contenido: buildResumen(acumulado) }]);
         }
         setThinkingText("");
-      })
-      .catch((err) => {
+      } catch (err) {
+        // Cancelación (cambio de documento / desmontaje): no es un error para el usuario.
+        if (cancelado || (err instanceof DOMException && err.name === "AbortError")) return;
         setStatus("error");
         setErrorMsg(err instanceof Error ? err.message : "Error al analizar el documento");
         setThinkingText("");
-      });
+      }
+    };
+
+    run();
+    return () => {
+      cancelado = true;
+      ctrl.abort(); // aborta de verdad las pasadas en vuelo (evita doble análisis en StrictMode)
+    };
   }, [documentText, config.docType]);
 
   useEffect(() => {
@@ -277,6 +343,7 @@ export const Workspace: React.FC = () => {
   };
 
   const handleChatOnSugerencia = async (s: Sugerencia) => {
+    if (sending) return;
     const meta = DIMENSION_META[s.dimension];
     const pregunta = `Decime más sobre el problema de ${meta.label.toLowerCase()}: "${s.mensaje}"`;
     const userMsg: Mensaje = { rol: "usuario", contenido: pregunta };
@@ -312,7 +379,7 @@ export const Workspace: React.FC = () => {
           <div className="flex-1 overflow-y-auto px-3 py-6">
           <div className="max-w-[700px] mx-auto flex flex-col gap-6">
 
-            {/* Loading state — Claude style */}
+            {/* Estado de carga inicial */}
             {messages.length === 0 && status === "loading" && (
               <div className="flex flex-col gap-6 py-16">
                 <div className="flex items-center gap-4">
@@ -346,11 +413,29 @@ export const Workspace: React.FC = () => {
               </div>
             )}
 
+            {/* Progreso: el modelo va analizando sección por sección (no es un error) */}
             {status === "partial" && (
+              <div className="bg-accent/5 border border-accent/15 rounded-sm px-5 py-4 text-body text-text-muted flex items-center gap-3">
+                <span className="w-2 h-2 bg-accent rounded-full animate-pulse shrink-0" />
+                <span>
+                  {progreso.total > 0 ? (
+                    <>
+                      Analizando por secciones — {progreso.hechas}/{progreso.total}
+                      {progreso.actual ? `: ${progreso.actual}` : ""}<ThinkingDots />
+                    </>
+                  ) : (
+                    <>{thinkingText || "Analizando el documento"}<ThinkingDots /></>
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Degradación real: solo si algún motor no respondió (nunca paréntesis vacíos) */}
+            {motoresFallidos.length > 0 && status !== "loading" && (
               <div className="bg-warn/10 border border-warn/20 rounded-sm px-5 py-4 text-body text-text-muted flex items-start gap-3">
                 <IconAlertTriangle size={18} className="text-warn shrink-0 mt-0.5" />
                 <span>
-                  Algunos análisis están incompletos ({motoresFallidos.join(", ")}).
+                  Algunos análisis no se completaron ({motoresFallidos.join(", ")}).
                   Mostrando resultados parciales.
                 </span>
               </div>
@@ -453,6 +538,14 @@ export const Workspace: React.FC = () => {
                 {config.carrera}
               </span>
             </div>
+
+            {/* Aviso de documento largo: el modelo solo vio el inicio; las reglas cubren todo el texto */}
+            {nota && (status === "success" || status === "partial") && (
+              <div className="mb-6 bg-info/10 border border-info/20 rounded-sm px-5 py-4 text-body text-text-muted flex items-start gap-3">
+                <IconInfoCircle size={18} className="text-info shrink-0 mt-0.5" />
+                <span>{nota}</span>
+              </div>
+            )}
 
             {documentText && (status === "success" || status === "partial") && (
               <div className="mb-10 text-body text-text-muted leading-relaxed font-mono whitespace-pre-wrap">
@@ -563,29 +656,12 @@ export const Workspace: React.FC = () => {
                         )}
                         {isExpanded && (
                           <button
+                            disabled={sending}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleChatOnSugerencia(s);
                             }}
-                            className="mt-3 text-body text-accent hover:text-accent-hover transition-colors underline underline-offset-4"
-                          >
-                            ¿Cómo corrijo esto?
-                          </button>
-                        )}
-                        {isExpanded && s.sugerencia && (
-                          <div className="mt-3 pt-3 border-t border-border-main/50">
-                            <p className="text-[13px] text-text-muted leading-relaxed">
-                              <span className="text-text-main font-medium">Sugerencia:</span> {s.sugerencia}
-                            </p>
-                          </div>
-                        )}
-                        {isExpanded && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleChatOnSugerencia(s);
-                            }}
-                            className="mt-3 text-[11px] text-accent hover:text-accent-hover transition-colors underline underline-offset-4"
+                            className="mt-3 text-body text-accent hover:text-accent-hover transition-colors underline underline-offset-4 disabled:opacity-50"
                           >
                             ¿Cómo corrijo esto?
                           </button>
