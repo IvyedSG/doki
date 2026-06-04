@@ -59,7 +59,7 @@ export const Wizard: React.FC = () => {
   };
 
   return (
-    <div className="relative w-full max-w-xl overflow-hidden rounded-rad-xl border border-border-main bg-bg2 p-10 shadow-2xl flex flex-col gap-8">
+    <div className="relative w-full max-w-xl overflow-hidden flex flex-col gap-8 px-4 py-8">
       {/* Glow de precisión */}
       <div className="absolute -top-24 -left-24 h-48 w-48 rounded-full bg-accent/5 blur-3xl pointer-events-none" />
 

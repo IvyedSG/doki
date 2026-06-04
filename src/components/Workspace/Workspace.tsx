@@ -145,7 +145,7 @@ export const Workspace: React.FC = () => {
   const { config, documentText } = useProject();
   const containerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const [chatPct, setChatPct] = useState(35);
+  const [chatPct, setChatPct] = useState(50);
   const [dragging, setDragging] = useState(false);
 
   const [status, setStatus] = useState<WorkspaceStatus>("loading");
@@ -162,6 +162,15 @@ export const Workspace: React.FC = () => {
   const [sending, setSending] = useState(false);
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [popoverId, setPopoverId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleOutsideClick = () => {
+      setPopoverId(null);
+    };
+    window.addEventListener("click", handleOutsideClick);
+    return () => window.removeEventListener("click", handleOutsideClick);
+  }, []);
 
   const [thinkingText, setThinkingText] = useState("");
   // Progreso del análisis por secciones (intro -> método -> …)
@@ -252,7 +261,7 @@ export const Workspace: React.FC = () => {
         }
         if (acumulado.length === 0 && fallidos.size > 0) {
           setStatus("error");
-          setErrorMsg("Ollama no está disponible. El análisis se limitará a reglas básicas de ortografía y normativa.\nPara análisis completo con IA: https://ollama.com");
+          setErrorMsg("La IA local (llama-server) no está disponible. El análisis se limitará a reglas básicas de ortografía y normativa.");
         } else {
           setStatus("success");
           setMessages([{ rol: "asistente", contenido: buildResumen(acumulado) }]);
@@ -319,7 +328,7 @@ export const Workspace: React.FC = () => {
     try {
       const res = await api.chat({
         mensaje: text,
-        historial: updated.map((m) => ({ rol: m.rol, contenido: m.contenido })),
+        historial: messages.map((m) => ({ rol: m.rol, contenido: m.contenido })),
         contexto: {
           documento: documentText ?? undefined,
           tipo_chat: "general",
@@ -350,12 +359,16 @@ export const Workspace: React.FC = () => {
     setMessages((prev) => [...prev, userMsg]);
     setSending(true);
     try {
+      const fragmento = s.rango ? (documentText ?? "").substring(s.rango.inicio, s.rango.fin) : undefined;
       const res = await api.chat({
         mensaje: pregunta,
         contexto: {
           documento: documentText ?? undefined,
           sugerencia_id: s.id,
           tipo_chat: "pedagogico",
+          fragmento: fragmento || undefined,
+          sugerencia_mensaje: s.mensaje,
+          sugerencia_reemplazo: s.sugerencia ?? undefined,
         },
       });
       setMessages((prev) => [...prev, { rol: "asistente", contenido: res.respuesta }]);
@@ -448,7 +461,7 @@ export const Workspace: React.FC = () => {
                 className={`flex ${msg.rol === "usuario" ? "justify-end" : ""}`}
               >
                 <div
-                  className={`rounded-xl px-6 py-5 text-body leading-relaxed whitespace-pre-wrap ${
+                  className={`rounded-xl px-6 py-5 text-body leading-relaxed whitespace-pre-wrap select-text ${
                     msg.rol === "usuario"
                       ? "bg-accent/10 text-text-main max-w-[70%]"
                       : "bg-bg2 text-text-muted w-full"
@@ -457,18 +470,86 @@ export const Workspace: React.FC = () => {
                   {msg.rol === "asistente" ? (
                     <div className="prose-custom leading-relaxed">
                       {msg.contenido.split("\n").map((line, li) => {
+                        const raw = line;
                         const t = line.trim();
                         if (!t) return <div key={li} className="h-2" />;
-                        if (t.startsWith("📋")) return <p key={li} className="text-text-main font-bold text-lg mb-4 mt-0">{t.replace(/\*\*/g, "")}</p>;
+                        
+                        // Resumen del análisis
+                        if (t.startsWith("📋")) {
+                          return (
+                            <h3 key={li} className="text-text-main font-bold text-base mb-4 mt-0 border-b border-border-main/50 pb-2">
+                              {t.replace(/📋\s*/, "")}
+                            </h3>
+                          );
+                        }
+                        
+                        // Encabezados de severidad (Críticos, A corregir, Sugerencias)
                         if (t.startsWith("🔴") || t.startsWith("🟡") || t.startsWith("🟢")) {
                           const isHeader = t.includes("—") || t.includes("·");
-                          return <p key={li} className={`${isHeader ? "text-text-main font-semibold text-base mt-5 mb-3" : "text-text-main mb-1 ml-4"}`}>{t.replace(/\*\*/g, "")}</p>;
+                          if (isHeader) {
+                            return (
+                              <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2 flex items-center gap-2">
+                                {t.replace(/\*\*/g, "")}
+                              </h4>
+                            );
+                          }
                         }
-                        if (t.startsWith("✅")) return <p key={li} className="text-text-main font-semibold text-base mt-5 mb-3">{t}</p>;
-                        if (t.startsWith("**Veredicto") || t.match(/^\*\*.*\*\*/)) return <p key={li} className="text-text-main font-semibold text-base mt-5 mb-2">{t.replace(/\*\*/g, "")}</p>;
-                        if (t.startsWith(">")) return <p key={li} className="text-text-hint text-label mb-1 ml-6 italic">{t.replace(/^>\s*/, "")}</p>;
-                        if (t.startsWith("•")) return <p key={li} className="text-text-muted mb-1 ml-4">{t}</p>;
-                        return <p key={li} className="text-text-muted mb-1">{t.replace(/\*\*/g, "")}</p>;
+                        
+                        // Aspectos correctos
+                        if (t.startsWith("✅")) {
+                          return (
+                            <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2 flex items-center gap-2">
+                              {t}
+                            </h4>
+                          );
+                        }
+                        
+                        // Veredicto
+                        if (t.startsWith("**Veredicto") || t.match(/^\*\*.*\*\*/)) {
+                          return (
+                            <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2">
+                              {t.replace(/\*\*/g, "")}
+                            </h4>
+                          );
+                        }
+                        
+                        // Subcategorías de error (ej: "  Error ortográfico · 40 casos")
+                        // Identificado porque empieza con espacios pero no es un ejemplo (no empieza con > ni •)
+                        if (raw.startsWith("  ") && !t.startsWith(">") && !t.startsWith("•")) {
+                          return (
+                            <p key={li} className="text-text-main font-semibold text-xs mt-3 mb-1 ml-4 uppercase tracking-wider">
+                              {t}
+                            </p>
+                          );
+                        }
+                        
+                        // Bloque de ejemplo de error (ej: "  > Posible error...")
+                        if (t.startsWith(">")) {
+                          return (
+                            <div key={li} className="bg-bg3 border-l-2 border-accent/40 py-1.5 px-3 my-1 ml-6 rounded-xs">
+                              <span className="text-text-muted text-xs italic font-mono block whitespace-normal">
+                                {t.replace(/^>\s*/, "")}
+                              </span>
+                            </div>
+                          );
+                        }
+                        
+                        // Lista de viñetas
+                        if (t.startsWith("•")) {
+                          return (
+                            <p key={li} className="text-text-muted text-xs mb-1 ml-6 flex items-start gap-1.5">
+                              <span>•</span>
+                              <span>{t.replace(/^•\s*/, "")}</span>
+                            </p>
+                          );
+                        }
+                        
+                        // Texto normal
+                        return (
+                          <p key={li} className="text-text-muted text-xs mb-1 ml-4">
+                            {t.replace(/\*\*/g, "")}
+                          </p>
+                        );
                       })}
                     </div>
                   ) : (
@@ -548,18 +629,34 @@ export const Workspace: React.FC = () => {
             )}
 
             {documentText && (status === "success" || status === "partial") && (
-              <div className="mb-10 text-body text-text-muted leading-relaxed font-mono whitespace-pre-wrap">
+              <div className="mb-10 text-body text-text-muted leading-relaxed font-mono whitespace-pre-wrap select-text">
                 {segmentText(documentText, sugerencias).map((seg, i) => {
                   if (seg.type === "normal") {
                     return <span key={i}>{seg.text}</span>;
                   }
+                  const s = sugerencias.find((x) => x.id === seg.sugerenciaId);
+                  if (!s) return <span key={i}>{seg.text}</span>;
+
+                  const meta = DIMENSION_META[s.dimension];
+                  const Icon = meta.icon;
+                  const sevIcon = s.severidad === "error" ? "🔴" : s.severidad === "advertencia" ? "🟡" : "🟢";
+                  const sevColor =
+                    s.severidad === "error" ? "var(--danger)" :
+                    s.severidad === "advertencia" ? "var(--warn)" :
+                    "var(--text-hint)";
+                  const sevLabel =
+                    s.severidad === "error" ? "Crítico" :
+                    s.severidad === "advertencia" ? "A corregir" :
+                    "Sugerencia";
+
                   return (
                     <span
                       key={i}
-                      className={`highlight-${seg.type} cursor-pointer`}
-                      onClick={() => {
-                        const s = sugerencias.find((x) => x.id === seg.sugerenciaId);
-                        if (s) handleCardClick(s);
+                      className={`highlight-${seg.type} cursor-pointer relative`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPopoverId(popoverId === s.id ? null : s.id);
+                        handleCardClick(s);
                       }}
                       title={
                         seg.type === "organizacion"
@@ -570,6 +667,48 @@ export const Workspace: React.FC = () => {
                       }
                     >
                       {seg.text}
+
+                      {popoverId === s.id && (
+                        <span
+                          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 bg-bg2 border border-border-main rounded-md p-4 shadow-xl z-50 text-text-main normal-case cursor-default select-text inline-block"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span className="flex items-center gap-2 mb-2 flex-wrap text-label">
+                            <Icon size={14} style={{ color: meta.color }} />
+                            <span className="font-semibold uppercase tracking-wider" style={{ color: meta.color }}>
+                              {meta.label}
+                            </span>
+                            <span
+                              className="text-[9px] px-1.5 py-0.5 rounded-sm font-medium"
+                              style={{ backgroundColor: sevColor + "12", color: sevColor }}
+                            >
+                              {sevIcon} {sevLabel}
+                            </span>
+                            <span className="text-[9px] text-text-hint ml-auto">{s.rf}</span>
+                          </span>
+                          <span className="text-body text-text-main leading-relaxed mb-2 font-sans block whitespace-normal">
+                            {s.mensaje}
+                          </span>
+                          {s.sugerencia && (
+                            <span className="mt-2 pt-2 border-t border-border-main/50 text-text-muted text-body font-sans block whitespace-normal">
+                              <span className="text-text-main font-medium">💡 Sugerencia:</span> {s.sugerencia}
+                            </span>
+                          )}
+                          <span className="mt-3 flex justify-end gap-2 block">
+                            <button
+                              disabled={sending}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleChatOnSugerencia(s);
+                                setPopoverId(null);
+                              }}
+                              className="text-label text-accent hover:text-accent-hover transition-colors underline underline-offset-4 disabled:opacity-50 font-sans cursor-pointer bg-transparent border-0 p-0"
+                            >
+                              ¿Cómo corrijo esto?
+                            </button>
+                          </span>
+                        </span>
+                      )}
                     </span>
                   );
                 })}

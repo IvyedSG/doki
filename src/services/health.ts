@@ -27,12 +27,9 @@ export function useHealthCheck() {
         if (cancelled) return;
         delay = 8_000;
 
-        if (!res.ollama_ok) {
+        if (!res.ollama_ok || !res.modelo_listo) {
           setHealth({ ok: true, ollamaOk: false, modeloListo: false,
-            mensaje: "Sin IA local", color: "bg-warn" });
-        } else if (!res.modelo_listo) {
-          setHealth({ ok: true, ollamaOk: true, modeloListo: false,
-            mensaje: "Modelo cargando...", color: "bg-accent" });
+            mensaje: "Iniciando...", color: "bg-accent" });
         } else {
           setHealth({ ok: true, ollamaOk: true, modeloListo: true,
             mensaje: "Listo", color: "bg-teal" });

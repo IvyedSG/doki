@@ -180,7 +180,6 @@ export interface components {
             /** Respuesta */
             respuesta: string;
         };
-        /** ContextoChat */
         ContextoChat: {
             /** Documento */
             documento?: string | null;
@@ -188,6 +187,12 @@ export interface components {
             sugerencia_id?: string | null;
             /** Tipo Chat */
             tipo_chat?: string | null;
+            /** Fragmento */
+            fragmento?: string | null;
+            /** Sugerencia Mensaje */
+            sugerencia_mensaje?: string | null;
+            /** Sugerencia Reemplazo */
+            sugerencia_reemplazo?: string | null;
         };
         /** DetectarParametrosRequest */
         DetectarParametrosRequest: {
