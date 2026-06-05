@@ -8,6 +8,10 @@ import {
   IconFileText,
   IconCpu,
   IconLock,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
+  IconLayoutSidebarRightCollapse,
+  IconLayoutSidebarRightExpand,
 } from "@tabler/icons-react";
 import logoSource from "../../assets/doki_source_logo.png";
 
@@ -16,7 +20,8 @@ interface AppShellProps {
 }
 
 export const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const { inWorkspace, setInWorkspace, fileName } = useProject();
+  const { inWorkspace, setInWorkspace, fileName, showChat, setShowChat, showFeedback, setShowFeedback } =
+    useProject();
   const health = useHealthCheck();
 
   const statusColor = health.ok ? health.color : "bg-danger";
@@ -70,6 +75,28 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
             <span className="text-body text-text-muted truncate">
               {fileName ?? "Sin documento"}
             </span>
+
+            {/* Toggles de paneles (estilo VS Code): ocultar/mostrar chat y retroalimentación */}
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => setShowChat(!showChat)}
+                title={showChat ? "Ocultar chat" : "Mostrar chat"}
+                className={`h-8 w-8 flex items-center justify-center rounded-rad transition-all duration-150 ${
+                  showChat ? "text-accent hover:bg-bg3" : "text-text-hint hover:text-text-muted hover:bg-bg3"
+                }`}
+              >
+                {showChat ? <IconLayoutSidebarLeftCollapse size={19} /> : <IconLayoutSidebarLeftExpand size={19} />}
+              </button>
+              <button
+                onClick={() => setShowFeedback(!showFeedback)}
+                title={showFeedback ? "Ocultar retroalimentación" : "Mostrar retroalimentación"}
+                className={`h-8 w-8 flex items-center justify-center rounded-rad transition-all duration-150 ${
+                  showFeedback ? "text-accent hover:bg-bg3" : "text-text-hint hover:text-text-muted hover:bg-bg3"
+                }`}
+              >
+                {showFeedback ? <IconLayoutSidebarRightCollapse size={19} /> : <IconLayoutSidebarRightExpand size={19} />}
+              </button>
+            </div>
           </header>
         )}
         <div className="flex-1 overflow-hidden">

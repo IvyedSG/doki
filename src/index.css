@@ -131,3 +131,83 @@ body {
 .highlight-gramatica:hover {
   background: rgba(224, 85, 85, 0.20);
 }
+
+/* ── Hoja tipo documento ──────────────────────────────────────────────────────
+   El texto extraído del .docx se renderiza como una "hoja" (ancho carta, papel,
+   serif, líneas aireadas) para que se LEA como un documento, no como un muro de
+   texto monoespaciado.
+   Nota honesta: un .docx NO guarda páginas (las calcula Word al imprimir según el
+   tamaño de hoja). Por eso esto es UNA hoja continua con aspecto de documento, no
+   páginas reales separadas. */
+.doc-sheet {
+  background: #faf8f2;
+  color: #201e18;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.04rem;
+  line-height: 1.95;
+  padding: 60px 72px;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 14px 44px rgba(0, 0, 0, 0.38);
+  text-align: justify;
+  hyphens: auto;
+}
+
+/* En la hoja clara las marcas SE VEN (fondo de color tenue + subrayado), pero el
+   re-mapeo "el más chico gana" (segmentText) evita que un párrafo entero tape a la
+   marca de palabra que tiene adentro. Gramática = subrayado ondulado (como Word). */
+.doc-sheet .highlight-organizacion,
+.doc-sheet .highlight-coherencia,
+.doc-sheet .highlight-gramatica {
+  border-radius: 2px;
+  border-bottom-width: 2px;
+  transition: background 0.15s;
+}
+.doc-sheet .highlight-organizacion {
+  background: rgba(47, 111, 208, 0.13);
+  border-bottom-color: #2f6fd0;
+}
+.doc-sheet .highlight-organizacion:hover { background: rgba(47, 111, 208, 0.24); }
+.doc-sheet .highlight-coherencia {
+  background: rgba(192, 118, 28, 0.15);
+  border-bottom-color: #c0761c;
+}
+.doc-sheet .highlight-coherencia:hover { background: rgba(192, 118, 28, 0.26); }
+.doc-sheet .highlight-gramatica {
+  background: rgba(204, 59, 59, 0.12);
+  border-bottom-style: wavy;
+  border-bottom-color: #cc3b3b;
+}
+.doc-sheet .highlight-gramatica:hover { background: rgba(204, 59, 59, 0.22); }
+
+/* Marca activa (al hacer click en su tarjeta): se ilumina para ubicarla rápido. */
+.doc-sheet .hl-active {
+  background: rgba(220, 170, 40, 0.30) !important;
+  border-radius: 2px;
+}
+
+/* ── Vista FIEL (docx-preview): el .docx renderizado como en Word ─────────────
+   docx-preview arma `.docx-wrapper` (fondo) con páginas `section.docx` (hojas
+   blancas reales con sus márgenes/bordes). Lo adaptamos al tema oscuro: el fondo
+   del contenedor se hace transparente y cada página flota con sombra. */
+.docx-host {
+  display: flex;
+  justify-content: center;
+}
+.docx-wrapper {
+  background: transparent !important;
+  padding: 8px 0 40px !important;
+  gap: 24px;
+}
+.docx-wrapper > section.docx {
+  margin-bottom: 24px !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45), 0 14px 44px rgba(0, 0, 0, 0.4);
+  border-radius: 2px;
+}
+/* Word auto-corta palabras en el índice ("INTRODUC-CIÓN"); lo desactivamos para que
+   no parta a mitad. El índice (TOC) con tabuladores/puntos y números a la derecha es
+   el punto flojo de docx-preview (campo auto-generado): la portada y el cuerpo sí
+   salen fieles. */
+.docx-wrapper .docx p {
+  hyphens: manual !important;
+  -webkit-hyphens: manual !important;
+}

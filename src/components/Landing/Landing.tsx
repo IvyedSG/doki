@@ -4,7 +4,7 @@ import { extractTextFromDocx } from "../../services/docx";
 import { IconFileUpload } from "@tabler/icons-react";
 
 export const Landing: React.FC = () => {
-  const { setFileName, setDocumentText, setShowWizard } = useProject();
+  const { setFileName, setDocumentText, setDocxBuffer, setShowWizard } = useProject();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
@@ -15,13 +15,17 @@ export const Landing: React.FC = () => {
     try {
       let text: string;
       if (file.name.endsWith(".docx")) {
+        // guardamos los bytes para el render fiel (docx-preview), además del texto para analizar
+        setDocxBuffer(await file.arrayBuffer());
         text = await extractTextFromDocx(file);
       } else {
+        setDocxBuffer(null); // .txt/.md no tienen formato Word
         text = await file.text();
       }
       setDocumentText(text.normalize("NFC"));
       setShowWizard(true);
     } catch {
+      setDocxBuffer(null);
       setDocumentText("[Error al leer el archivo]");
       setShowWizard(true);
     }
@@ -44,6 +48,7 @@ export const Landing: React.FC = () => {
 
   const loadDemo = () => {
     setFileName("tesis_investigacion_final_v3.txt");
+    setDocxBuffer(null);
     setDocumentText(
       "APLICACIÓN DE ESCRITORIO BASADA EN INTELIGENCIA ARTIFICIAL Y SU EFECTO EN LA NORMALIZACIÓN DE DOCUMENTOS ACADÉMICOS\n\n"
       + "1. INTRODUCCIÓN\n\n"

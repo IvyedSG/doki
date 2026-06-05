@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { useProject } from "../../context/ProjectContext";
 import { api } from "../../services/api";
+import { renderDocx } from "../../services/docxView";
 import { mapDocType } from "../../types/mapping";
 import { segmentText } from "../../types/highlights";
 import type { Sugerencia, MensajeChat as Mensaje, Dimension } from "../../types/api";
@@ -13,6 +14,8 @@ import {
   IconHierarchy,
   IconLink,
   IconTypography,
+  IconMinus,
+  IconPlus,
 } from "@tabler/icons-react";
 
 type WorkspaceStatus = "loading" | "success" | "error" | "partial";
@@ -142,10 +145,17 @@ function ThinkingDots() {
 }
 
 export const Workspace: React.FC = () => {
-  const { config, documentText } = useProject();
+  const { config, documentText, docxBuffer, showChat, showFeedback } = useProject();
   const containerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const [chatPct, setChatPct] = useState(50);
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({}); // para scrollear a la tarjeta
+  const docxRef = useRef<HTMLDivElement>(null); // contenedor del render fiel (docx-preview)
+  const docScrollRef = useRef<HTMLDivElement>(null); // scroll del panel del documento
+  // Vista del documento: "marcado" = texto con resaltados (es el valor del producto);
+  // "fiel" = render real de Word (docx-preview), a un click. Default: marcado.
+  const [vista, setVista] = useState<"fiel" | "marcado">("marcado");
+  const [zoom, setZoom] = useState(1); // zoom SOLO del documento (no del resto de la UI)
+  const [chatPct, setChatPct] = useState(32); // 3 columnas: chat | documento (flex) | feedback
   const [dragging, setDragging] = useState(false);
 
   const [status, setStatus] = useState<WorkspaceStatus>("loading");
@@ -287,6 +297,37 @@ export const Workspace: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Render FIEL del .docx (docx-preview) cuando está en vista "fiel" y hay bytes del archivo.
+  useEffect(() => {
+    if (vista !== "fiel" || !docxBuffer || !docxRef.current) return;
+    let cancel = false;
+    const host = docxRef.current;
+    host.innerHTML =
+      '<p class="text-text-hint text-label px-2 py-10 text-center">Cargando vista fiel…</p>';
+    renderDocx(host, docxBuffer).catch(() => {
+      if (!cancel)
+        host.innerHTML =
+          '<p class="text-text-muted text-body px-2 py-10 text-center">No se pudo renderizar la vista fiel del documento.</p>';
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [docxBuffer, vista]);
+
+  // Al alternar Fiel/Marcado, volver al inicio del documento (si no, queda scrolleado abajo
+  // donde estabas en la otra vista y parece que "no cambió"). useLayoutEffect corre ANTES de
+  // pintar -> el usuario nunca ve la posición vieja. El rAF reasegura cuando el render fiel
+  // (docx-preview, asíncrono) crece después.
+  useLayoutEffect(() => {
+    const el = docScrollRef.current;
+    if (!el) return;
+    el.scrollTop = 0;
+    const id = requestAnimationFrame(() => {
+      el.scrollTop = 0;
+    });
+    return () => cancelAnimationFrame(id);
+  }, [vista]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setDragging(true);
@@ -299,7 +340,7 @@ export const Workspace: React.FC = () => {
     const onMove = (e: MouseEvent) => {
       const rect = container.getBoundingClientRect();
       let pct = ((e.clientX - rect.left) / rect.width) * 100;
-      pct = Math.max(25, Math.min(75, pct));
+      pct = Math.max(22, Math.min(50, pct)); // deja sitio al documento + barra de feedback
       setChatPct(pct);
     };
     const onUp = () => setDragging(false);
@@ -311,9 +352,29 @@ export const Workspace: React.FC = () => {
     };
   }, [dragging]);
 
-  const filteredSugerencias = sugerencias.filter(
-    (s) => dimFilter === "todas" || s.dimension === dimFilter,
-  );
+  // Tarjetas en ORDEN DEL DOCUMENTO (por posición del rango). Las que no tienen rango
+  // (RF-01/03/06: estructura y flujo) van al final, no intercaladas a mitad del texto.
+  const filteredSugerencias = sugerencias
+    .filter((s) => dimFilter === "todas" || s.dimension === dimFilter)
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.rango?.inicio ?? Number.MAX_SAFE_INTEGER) -
+        (b.rango?.inicio ?? Number.MAX_SAFE_INTEGER),
+    );
+
+  // Lleva la vista al resaltado dentro de la hoja (la primera ocurrencia tiene id `hl-<id>`).
+  const scrollAlResaltado = (id: string) => {
+    requestAnimationFrame(() =>
+      document.getElementById(`hl-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    );
+  };
+  // Lleva la vista a la tarjeta de retroalimentación correspondiente.
+  const scrollALaTarjeta = (id: string) => {
+    requestAnimationFrame(() =>
+      cardRefs.current[id]?.scrollIntoView({ behavior: "smooth", block: "center" }),
+    );
+  };
 
   const handleSend = async () => {
     const text = chatInput.trim();
@@ -346,9 +407,11 @@ export const Workspace: React.FC = () => {
   };
 
   const handleCardClick = (s: Sugerencia) => {
-    setExpandedId(expandedId === s.id ? null : s.id);
+    const abriendo = expandedId !== s.id;
+    setExpandedId(abriendo ? s.id : null);
     setHighlightedId(s.id);
     setDimFilter("todas");
+    if (abriendo) scrollAlResaltado(s.id); // al abrir la tarjeta, ubico su marca en la hoja
   };
 
   const handleChatOnSugerencia = async (s: Sugerencia) => {
@@ -382,9 +445,13 @@ export const Workspace: React.FC = () => {
     }
   };
 
+  // Vista fiel solo si hay bytes del .docx (los .txt/.md/demo van siempre a "marcado").
+  const fiel = vista === "fiel" && !!docxBuffer;
+
   return (
     <div ref={containerRef} className="flex h-full">
-      {/* ── CHAT PANEL ── */}
+      {/* ── CHAT PANEL (ocultable, estilo VS Code) ── */}
+      {showChat && (
       <div
         className="flex flex-col bg-bg overflow-hidden"
         style={{ width: `${chatPct}%` }}
@@ -593,8 +660,10 @@ export const Workspace: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
-      {/* DRAG HANDLE */}
+      {/* DRAG HANDLE (solo cuando el chat está visible) */}
+      {showChat && (
       <div
         className={`w-1 shrink-0 cursor-col-resize relative transition-colors ${
           dragging ? "bg-accent/30" : "bg-border-main hover:bg-accent/20"
@@ -603,39 +672,101 @@ export const Workspace: React.FC = () => {
       >
         <div className="absolute inset-y-0 -left-1 -right-1" />
       </div>
+      )}
 
-      {/* ── DOCUMENT PANEL ── */}
-      <div
-        className="flex flex-col bg-bg3 overflow-hidden"
-        style={{ width: `${100 - chatPct}%` }}
-      >
-        <div className="flex-1 overflow-y-auto">
-          <div className="py-8 px-5 max-w-[750px] mx-auto">
-            <div className="mb-6 flex items-center gap-3 flex-wrap">
-              <span className="inline-block text-[10px] text-accent bg-accent/5 px-3 py-1.5 rounded-sm font-medium tracking-wider uppercase">
-                {config.norm === "apa7" ? "APA 7" : config.norm}
-              </span>
-              <span className="inline-block text-[10px] text-text-hint bg-bg2 px-3 py-1.5 rounded-sm font-medium">
-                {config.carrera}
-              </span>
+      {/* ── DOCUMENT PANEL (centro, ocupa el espacio restante) ── */}
+      <div className="flex flex-col bg-bg3 overflow-hidden flex-1 min-w-0">
+        <div ref={docScrollRef} className="flex-1 overflow-y-auto">
+          {/* Barra: metadatos + alternar vista (Fiel = render Word / Marcado = texto con marcas) */}
+          <div className="px-5 pt-7 pb-3 max-w-[980px] mx-auto flex items-center gap-3 flex-wrap">
+            <span className="inline-block text-[10px] text-accent bg-accent/5 px-3 py-1.5 rounded-sm font-medium tracking-wider uppercase">
+              {config.norm === "apa7" ? "APA 7" : config.norm}
+            </span>
+            <span className="inline-block text-[10px] text-text-hint bg-bg2 px-3 py-1.5 rounded-sm font-medium">
+              {config.carrera}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              {/* Zoom: agranda/achica SOLO el documento (sin tocar el resto de la app) */}
+              <div className="flex items-center gap-0.5 bg-bg2 rounded-sm p-0.5">
+                <button
+                  onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.1).toFixed(2)))}
+                  title="Achicar"
+                  className="px-2 py-1 rounded-xs text-text-muted hover:text-text-main hover:bg-bg3 transition-colors"
+                >
+                  <IconMinus size={14} />
+                </button>
+                <button
+                  onClick={() => setZoom(1)}
+                  title="Restablecer (100%)"
+                  className="px-1 py-1 rounded-xs text-[11px] text-text-muted hover:text-text-main tabular-nums min-w-[42px] text-center"
+                >
+                  {Math.round(zoom * 100)}%
+                </button>
+                <button
+                  onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))}
+                  title="Agrandar"
+                  className="px-2 py-1 rounded-xs text-text-muted hover:text-text-main hover:bg-bg3 transition-colors"
+                >
+                  <IconPlus size={14} />
+                </button>
+              </div>
+
+              {docxBuffer && (
+                <div className="flex items-center gap-0.5 bg-bg2 rounded-sm p-0.5">
+                  <button
+                    onClick={() => setVista("fiel")}
+                    title="Ver el documento tal como se ve en Word"
+                    className={`px-3 py-1 rounded-xs text-[11px] transition-colors ${
+                      vista === "fiel" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-main"
+                    }`}
+                  >
+                    Fiel (Word)
+                  </button>
+                  <button
+                    onClick={() => setVista("marcado")}
+                    title="Ver el texto con los resaltados de cada indicador"
+                    className={`px-3 py-1 rounded-xs text-[11px] transition-colors ${
+                      vista === "marcado" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-main"
+                    }`}
+                  >
+                    Marcado
+                  </button>
+                </div>
+              )}
             </div>
+          </div>
 
-            {/* Aviso de documento largo: el modelo solo vio el inicio; las reglas cubren todo el texto */}
-            {nota && (status === "success" || status === "partial") && (
-              <div className="mb-6 bg-info/10 border border-info/20 rounded-sm px-5 py-4 text-body text-text-muted flex items-start gap-3">
+          {/* Aviso de documento largo: el modelo solo vio el inicio; las reglas cubren todo el texto */}
+          {nota && (status === "success" || status === "partial") && (
+            <div className="mb-4 max-w-[980px] mx-auto px-5">
+              <div className="bg-info/10 border border-info/20 rounded-sm px-5 py-4 text-body text-text-muted flex items-start gap-3">
                 <IconInfoCircle size={18} className="text-info shrink-0 mt-0.5" />
                 <span>{nota}</span>
               </div>
-            )}
+            </div>
+          )}
 
+          {/* `zoom` escala SOLO el documento (Fiel o Marcado); la barra y la UI no se tocan */}
+          <div style={{ zoom }}>
+          {fiel ? (
+            /* ── VISTA FIEL: render real del .docx (docx-preview), solo lectura ── */
+            <div ref={docxRef} className="docx-host px-5 pb-12" />
+          ) : (
+          <div className="pb-8 px-5 max-w-[860px] mx-auto">
             {documentText && (status === "success" || status === "partial") && (
-              <div className="mb-10 text-body text-text-muted leading-relaxed font-mono whitespace-pre-wrap select-text">
-                {segmentText(documentText, sugerencias).map((seg, i) => {
+              <div className="mb-10 doc-sheet whitespace-pre-wrap select-text">
+                {(() => {
+                // id solo en la 1ra ocurrencia de cada sugerencia (una marca de párrafo puede
+                // partirse en varios tramos): evita ids y popovers duplicados.
+                const renderedHl = new Set<string>();
+                return segmentText(documentText, sugerencias).map((seg, i) => {
                   if (seg.type === "normal") {
                     return <span key={i}>{seg.text}</span>;
                   }
                   const s = sugerencias.find((x) => x.id === seg.sugerenciaId);
                   if (!s) return <span key={i}>{seg.text}</span>;
+                  const firstOfId = !renderedHl.has(s.id);
+                  renderedHl.add(s.id);
 
                   const meta = DIMENSION_META[s.dimension];
                   const Icon = meta.icon;
@@ -652,11 +783,17 @@ export const Workspace: React.FC = () => {
                   return (
                     <span
                       key={i}
-                      className={`highlight-${seg.type} cursor-pointer relative`}
+                      id={firstOfId ? `hl-${s.id}` : undefined}
+                      className={`highlight-${seg.type} cursor-pointer relative ${
+                        highlightedId === s.id ? "hl-active" : ""
+                      }`}
                       onClick={(e) => {
                         e.stopPropagation();
                         setPopoverId(popoverId === s.id ? null : s.id);
-                        handleCardClick(s);
+                        setExpandedId(s.id);
+                        setHighlightedId(s.id);
+                        setDimFilter("todas");
+                        scrollALaTarjeta(s.id); // llevo la vista a su tarjeta de detalle
                       }}
                       title={
                         seg.type === "organizacion"
@@ -668,7 +805,7 @@ export const Workspace: React.FC = () => {
                     >
                       {seg.text}
 
-                      {popoverId === s.id && (
+                      {firstOfId && popoverId === s.id && (
                         <span
                           className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 bg-bg2 border border-border-main rounded-md p-4 shadow-xl z-50 text-text-main normal-case cursor-default select-text inline-block"
                           onClick={(e) => e.stopPropagation()}
@@ -711,45 +848,64 @@ export const Workspace: React.FC = () => {
                       )}
                     </span>
                   );
-                })}
+                });
+                })()}
               </div>
             )}
+          </div>
+          )}
+          </div>
+        </div>
+      </div>
 
-            {/* Dimension filter tabs */}
-            {sugerencias.length > 0 && (
-              <div className="mb-6">
-                <div className="flex gap-2 flex-wrap">
-                  {DIMENSION_TABS.map((tab) => {
-                    const count =
-                      tab.key === "todas"
-                        ? sugerencias.length
-                        : sugerencias.filter((s) => s.dimension === tab.key).length;
-                    return (
-                      <button
-                        key={tab.key}
-                        onClick={() => setDimFilter(tab.key)}
-                        className={`px-4 py-2 rounded-full text-label border transition-all ${
-                          dimFilter === tab.key
-                            ? "bg-accent/10 border-accent text-accent"
-                            : "bg-transparent border-border-main text-text-muted hover:border-accent hover:text-accent"
-                        }`}
-                      >
-                        {tab.label}
-                        <span className="ml-1.5 opacity-60">({count})</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+      {/* ── FEEDBACK SIDEBAR (ocultable, barra lateral con scroll propio) ── */}
+      {showFeedback && (
+      <div className="flex flex-col bg-bg overflow-hidden w-[360px] shrink-0 border-l border-border-main">
+        {/* Header FIJO: título + filtro por dimensión (no scrollea con las tarjetas) */}
+        {sugerencias.length > 0 && (
+          <div className="px-4 pt-5 pb-3 border-b border-border-main shrink-0">
+            <span className="text-[10px] text-text-hint font-medium tracking-widest uppercase block mb-3">
+              Retroalimentación
+            </span>
+            <div className="flex gap-1.5 flex-wrap">
+              {DIMENSION_TABS.map((tab) => {
+                const count =
+                  tab.key === "todas"
+                    ? sugerencias.length
+                    : sugerencias.filter((s) => s.dimension === tab.key).length;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setDimFilter(tab.key)}
+                    className={`px-3 py-1.5 rounded-full text-[11px] border transition-all ${
+                      dimFilter === tab.key
+                        ? "bg-accent/10 border-accent text-accent"
+                        : "bg-transparent border-border-main text-text-muted hover:border-accent hover:text-accent"
+                    }`}
+                  >
+                    {tab.label}
+                    <span className="ml-1 opacity-60">({count})</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
-            {/* Feedback cards by RF group */}
-            {filteredSugerencias.length > 0 && (
-              <div>
-                <span className="text-[10px] text-text-hint font-medium tracking-widest uppercase mb-5 block">
-                  Retroalimentación
-                </span>
-                <div className="flex flex-col gap-2">
+        {/* Cuerpo: las tarjetas con SU PROPIO scroll (ya no debajo del documento) */}
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+          {sugerencias.length === 0 && (
+            <p className="text-label text-text-hint text-center px-2 py-16 leading-relaxed">
+              {status === "loading" || status === "partial"
+                ? "El análisis va apareciendo acá…"
+                : status === "success"
+                  ? "✓ Sin problemas detectados."
+                  : "Sin retroalimentación."}
+            </p>
+          )}
+
+          {filteredSugerencias.length > 0 && (
+            <div className="flex flex-col gap-2">
                   {filteredSugerencias.map((s) => {
                     const meta = DIMENSION_META[s.dimension];
                     const Icon = meta.icon;
@@ -766,9 +922,12 @@ export const Workspace: React.FC = () => {
                     return (
                       <div
                         key={s.id}
+                        ref={(el) => {
+                          cardRefs.current[s.id] = el;
+                        }}
                         onClick={() => handleCardClick(s)}
-                        className={`bg-bg2 rounded-sm p-5 text-left border-l-2 cursor-pointer transition-all ${
-                          highlightedId === s.id ? "border-l-[3px] brightness-125" : "hover:brightness-110"
+                        className={`bg-bg2 rounded-sm p-5 text-left border-l-2 cursor-pointer transition-all scroll-mt-6 ${
+                          highlightedId === s.id ? "border-l-[3px] brightness-125 ring-1 ring-accent/40" : "hover:brightness-110"
                         }`}
                         style={{ borderLeftColor: meta.color }}
                       >
@@ -809,20 +968,19 @@ export const Workspace: React.FC = () => {
                     );
                   })}
                 </div>
-              </div>
-            )}
+          )}
 
-            {status === "success" && filteredSugerencias.length === 0 && (
-              <div className="flex flex-col items-center gap-3 py-20">
-                <IconCircleCheck size={32} className="text-teal" />
-                <p className="text-body text-text-muted">
-                  No se encontraron problemas en esta dimensión.
-                </p>
-              </div>
-            )}
-          </div>
+          {status === "success" && sugerencias.length > 0 && filteredSugerencias.length === 0 && (
+            <div className="flex flex-col items-center gap-3 py-20">
+              <IconCircleCheck size={32} className="text-teal" />
+              <p className="text-body text-text-muted text-center">
+                No se encontraron problemas en esta dimensión.
+              </p>
+            </div>
+          )}
         </div>
       </div>
+      )}
     </div>
   );
 };

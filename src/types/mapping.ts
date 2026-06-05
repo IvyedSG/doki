@@ -2,6 +2,7 @@ import type { DocType, NormType } from "../context/ProjectContext";
 
 const DOC_TYPE_MAP: Record<DocType, string> = {
   tesis: "tesis",
+  proyecto: "proyecto_investigacion",
   informe: "informe",
   ensayo: "ensayo_argumentativo",
   monografia: "monografia",

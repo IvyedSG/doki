@@ -4,6 +4,7 @@ import { Chip } from "../ui/Chip";
 
 const docDescriptions: Record<DocType, string> = {
   tesis: "Trabajo de investigación formal, riguroso y exhaustivo estructurado bajo un método científico para optar por un título profesional o grado académico.",
+  proyecto: "Propuesta de investigación (plan de tesis): tiene introducción, método y aspectos administrativos, pero todavía NO tiene resultados ni conclusiones.",
   informe: "Documento técnico descriptivo que reporta de manera objetiva los resultados, diagnóstico o el estado de avance de un proyecto de ingeniería.",
   ensayo: "Texto crítico, argumentativo y reflexivo centrado en analizar, debatir y defender una postura teórica o metodológica personal fundamentada.",
   monografia: "Estudio analítico de carácter bibliográfico enfocado en la recopilación, revisión y síntesis crítica de un tema académico específico.",
@@ -21,6 +22,7 @@ export const Step1: React.FC = () => {
 
   const docTypes: { value: DocType; label: string }[] = [
     { value: "tesis", label: "Tesis" },
+    { value: "proyecto", label: "Proyecto de investigación" },
     { value: "informe", label: "Informe" },
     { value: "ensayo", label: "Ensayo" },
     { value: "monografia", label: "Monografía" },
