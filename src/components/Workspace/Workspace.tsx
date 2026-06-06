@@ -50,89 +50,57 @@ function contar(items: Sugerencia[], severidad: string) {
   return items.filter((s) => s.severidad === severidad).length;
 }
 
-const SEV_ICON: Record<string, string> = {
-  error: "🔴",
-  advertencia: "🟡",
-  sugerencia: "🟢",
-};
-
+// Resumen EJECUTIVO estilo "PR": síntesis + conteos por severidad/indicador + veredicto que
+// DIRIGE al panel derecho. El detalle de cada hallazgo NO se vuelca acá (eso abruma); vive a la
+// derecha. Emite un mini-protocolo `@TIPO|campos` que el render del chat formatea.
 function buildResumen(sugerencias: Sugerencia[]): string {
-  const byDim: Record<string, Sugerencia[]> = { organizacion: [], coherencia: [], gramatica: [] };
-  for (const s of sugerencias) byDim[s.dimension]?.push(s);
-
+  const L: string[] = [];
+  L.push("@T|Revisión del documento");
   const total = sugerencias.length;
-  if (total === 0) return "📋 **Resumen del análisis**\n\nNo se encontraron problemas en tu documento.";
+  if (total === 0) {
+    L.push("@P|Tu documento cumple con los tres aspectos revisados: organización, coherencia y gramática.");
+    L.push("@V|0|0|0|0");
+    L.push("@N|¡Buen trabajo! No hay nada que corregir.");
+    return L.join("\n");
+  }
 
   const criticos = contar(sugerencias, "error");
   const graves = contar(sugerencias, "advertencia");
   const leves = contar(sugerencias, "sugerencia");
+  const dn = (d: string) => sugerencias.filter((s) => s.dimension === d).length;
 
-  const lines: string[] = [];
-  lines.push("📋 Resumen del análisis");
-  lines.push("");
+  L.push(
+    `@P|Encontré ${total} puntos en 3 aspectos — organización (${dn("organizacion")}), ` +
+      `coherencia (${dn("coherencia")}) y gramática (${dn("gramatica")}). El detalle de cada uno ` +
+      "está marcado en tu texto y listado a la derecha 👉",
+  );
+  L.push(`@V|${criticos}|${graves}|${leves}|${total}`);
 
-  // Header counts
-  const parts: string[] = [];
-  if (criticos > 0) parts.push(`🔴 ${criticos} críticos`);
-  if (graves > 0) parts.push(`🟡 ${graves} a corregir`);
-  if (leves > 0) parts.push(`🟢 ${leves} sugerencias`);
-  parts.push(`${total} total`);
-  lines.push(parts.join(" · "));
-  lines.push("");
-
-  // Por severidad
   const sevs: [string, string, string][] = [
-    ["error", "Críticos", "🔴"],
-    ["advertencia", "A corregir", "🟡"],
-    ["sugerencia", "Sugerencias", "🟢"],
+    ["error", "red", "Bloqueante"],
+    ["advertencia", "amber", "A corregir"],
+    ["sugerencia", "green", "Sugerencias"],
   ];
-  for (const [sev, label, icon] of sevs) {
-    const items = sugerencias.filter(s => s.severidad === sev);
-    if (items.length === 0) continue;
-    lines.push(`${icon} **${label}** — ${items.length}`);
-    const byRf: Record<string, Sugerencia[]> = {};
-    for (const s of items) {
-      if (!byRf[s.rf]) byRf[s.rf] = [];
-      byRf[s.rf].push(s);
-    }
-    for (const [rf, grupo] of Object.entries(byRf)) {
-      const rfLabel = RF_LABELS[rf] || rf;
-      const dimLabel = DIMENSION_META[grupo[0].dimension as keyof typeof DIMENSION_META]?.label || "";
-      lines.push(`  ${rfLabel} · ${grupo.length} casos (${dimLabel})`);
-      for (const s of grupo.slice(0, 2)) {
-        lines.push(`  > ${s.mensaje.slice(0, 120)}`);
-      }
-      if (grupo.length > 2) lines.push(`  > … y ${grupo.length - 2} más`);
-    }
-    lines.push("");
+  for (const [sev, color, label] of sevs) {
+    const items = sugerencias.filter((s) => s.severidad === sev);
+    if (!items.length) continue;
+    L.push(`@S|${color}|${label}|${items.length}`);
+    // Desglose por indicador — SOLO conteos (sin volcar los hallazgos, para no abrumar).
+    const porRf: Record<string, number> = {};
+    for (const s of items) porRf[s.rf] = (porRf[s.rf] || 0) + 1;
+    const linea = Object.entries(porRf)
+      .map(([rf, n]) => `${RF_LABELS[rf] || rf} (${n})`)
+      .join(" · ");
+    L.push(`@D|${linea}`);
   }
 
-  // Aspectos correctos
-  const sinProblemas = Object.entries(byDim).filter(([, items]) => items.length === 0);
-  if (sinProblemas.length > 0) {
-    lines.push("✅ Aspectos correctos");
-    for (const [dim] of sinProblemas) {
-      const meta = DIMENSION_META[dim as keyof typeof DIMENSION_META];
-      lines.push(`  • ${meta.label} — sin problemas detectados.`);
-    }
-    lines.push("");
-  }
-
-  // Veredicto
-  lines.push("**Veredicto**");
-  if (criticos > 0) {
-    lines.push(`${SEV_ICON["error"]} ${criticos} críticos · ${SEV_ICON["advertencia"]} ${graves} a corregir · ${SEV_ICON["sugerencia"]} ${leves} sugerencias · ${total} total`);
-    lines.push("Empezá por los críticos — son los que más afectan la calidad académica.");
-  } else if (graves > 0) {
-    lines.push(`${SEV_ICON["error"]} ${criticos} críticos · ${SEV_ICON["advertencia"]} ${graves} a corregir · ${SEV_ICON["sugerencia"]} ${leves} sugerencias · ${total} total`);
-    lines.push("Revisá los que están a corregir — mejorarlos hará una gran diferencia.");
-  } else if (leves > 0) {
-    lines.push(`🟢 Solo sugerencias menores (${leves}) — tu documento está en buena forma.`);
-  } else {
-    lines.push("No se encontraron problemas. ¡Buen trabajo!");
-  }
-
-  return lines.join("\n");
+  L.push(
+    "@N|" +
+      (graves > 0
+        ? `👉 Revisalos en el panel derecho — empezá por los ${graves} «a corregir».`
+        : "👉 Revisá las sugerencias en el panel derecho cuando quieras."),
+  );
+  return L.join("\n");
 }
 
 function ThinkingDots() {
@@ -203,6 +171,7 @@ export const Workspace: React.FC = () => {
       setStatus("loading");
       setThinkingText("Conectando con el backend");
       setSugerencias([]);
+      setMessages([]); // limpia el resumen viejo: no mostrar un informe stale mientras re-analiza
       setMotoresFallidos([]);
       setNota(null);
       setProgreso({ total: 0, hechas: 0, actual: "" });
@@ -540,7 +509,73 @@ export const Workspace: React.FC = () => {
                         const raw = line;
                         const t = line.trim();
                         if (!t) return <div key={li} className="h-2" />;
-                        
+
+                        // ── Informe estilo PR (protocolo @TIPO|campos que emite buildResumen) ──
+                        const COLOR: Record<string, string> = { red: "#e05555", amber: "#f0a050", green: "#4ecba8" };
+                        if (line.startsWith("@T|"))
+                          return (
+                            <h3 key={li} className="text-text-main font-bold text-sm mt-0 mb-2 pb-2 border-b border-border-main/60 flex items-center gap-2">
+                              <span>🔎</span>{line.slice(3)}
+                            </h3>
+                          );
+                        if (line.startsWith("@P|"))
+                          return <p key={li} className="text-text-muted text-xs leading-relaxed mb-1">{line.slice(3)}</p>;
+                        if (line.startsWith("@V|")) {
+                          const p = line.split("|");
+                          const badges = [
+                            { c: "red", v: p[1], l: "críticos" },
+                            { c: "amber", v: p[2], l: "a corregir" },
+                            { c: "green", v: p[3], l: "sugerencias" },
+                          ];
+                          return (
+                            <div key={li} className="flex items-center gap-1.5 my-2 flex-wrap">
+                              {badges.map((b) => (
+                                <span key={b.c} className="text-[10px] font-semibold px-2 py-1 rounded-full"
+                                  style={{ backgroundColor: COLOR[b.c] + "22", color: COLOR[b.c] }}>
+                                  {b.v} {b.l}
+                                </span>
+                              ))}
+                            </div>
+                          );
+                        }
+                        if (line.startsWith("@S|")) {
+                          const p = line.split("|");
+                          return (
+                            <div key={li} className="flex items-center gap-2 mt-4 mb-1">
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLOR[p[1]] }} />
+                              <span className="text-text-main font-bold text-[11px] uppercase tracking-wider">{p[2]}</span>
+                              <span className="text-[10px] text-text-hint">— {p[3]}</span>
+                            </div>
+                          );
+                        }
+                        if (line.startsWith("@F|")) {
+                          const p = line.split("|");
+                          return (
+                            <div key={li} className="mt-2 pl-2.5 border-l-2" style={{ borderColor: COLOR[p[1]] }}>
+                              <span className="text-[11px] font-semibold text-text-main">{p[3]}</span>
+                              <span className="text-[9px] text-text-hint ml-1.5">{p[2]} · {p[4]}</span>
+                            </div>
+                          );
+                        }
+                        if (line.startsWith("@L|"))
+                          return (
+                            <div key={li} className="pl-2.5 my-1">
+                              <span className="text-[10px] text-text-muted font-mono bg-bg3 rounded px-1.5 py-0.5 inline-flex items-center gap-1">📍 «{line.slice(3)}»</span>
+                            </div>
+                          );
+                        if (line.startsWith("@D|"))
+                          return <p key={li} className="text-[11px] text-text-muted leading-snug pl-2.5 mb-1">{line.slice(3)}</p>;
+                        if (line.startsWith("@M|"))
+                          return <p key={li} className="text-[10px] text-text-hint italic pl-2.5 mb-1">… y {line.slice(3)} más → en el panel derecho</p>;
+                        if (line.startsWith("@OK|"))
+                          return (
+                            <p key={li} className="text-[11px] text-text-muted pl-2.5 mb-0.5 flex items-center gap-1.5">
+                              <span className="text-teal">✓</span>{line.slice(4)}
+                            </p>
+                          );
+                        if (line.startsWith("@N|"))
+                          return <div key={li} className="mt-3 pt-2.5 border-t border-border-main/60 text-[11px] text-text-main leading-relaxed">{line.slice(3)}</div>;
+
                         // Resumen del análisis
                         if (t.startsWith("📋")) {
                           return (
