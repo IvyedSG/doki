@@ -2,11 +2,10 @@ import React from "react";
 import { ProjectProvider, useProject } from "./context/ProjectContext";
 import { AppShell } from "./components/AppShell/AppShell";
 import { Landing } from "./components/Landing/Landing";
-import { Wizard } from "./components/Wizard/Wizard";
 import { Workspace } from "./components/Workspace/Workspace";
 
 const AppContent: React.FC = () => {
-  const { inWorkspace, showWizard } = useProject();
+  const { inWorkspace } = useProject();
 
   return (
     <AppShell>
@@ -14,7 +13,7 @@ const AppContent: React.FC = () => {
         <Workspace />
       ) : (
         <div className="flex items-center justify-center h-full w-full">
-          {showWizard ? <Wizard /> : <Landing />}
+          <Landing />
         </div>
       )}
     </AppShell>

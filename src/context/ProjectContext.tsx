@@ -14,8 +14,6 @@ export interface ProjectConfig {
 interface ProjectContextType {
   config: ProjectConfig;
   updateConfig: (newConfig: Partial<ProjectConfig>) => void;
-  showWizard: boolean;
-  setShowWizard: (active: boolean) => void;
   inWorkspace: boolean;
   setInWorkspace: (active: boolean) => void;
   fileName: string | null;
@@ -25,6 +23,15 @@ interface ProjectContextType {
   // Bytes crudos del .docx (para el render fiel con docx-preview). null si es .txt/.md/demo.
   docxBuffer: ArrayBuffer | null;
   setDocxBuffer: (buf: ArrayBuffer | null) => void;
+  // Parámetros detectados automáticamente por el backend
+  detectedTipo: string;
+  setDetectedTipo: (v: string) => void;
+  detectedNorm: string;
+  setDetectedNorm: (v: string) => void;
+  detectedCarrera: string;
+  setDetectedCarrera: (v: string) => void;
+  detectedTema: string;
+  setDetectedTema: (v: string) => void;
   // Paneles ocultables (estilo VS Code): chat (izq) y retroalimentación (der).
   showChat: boolean;
   setShowChat: (v: boolean) => void;
@@ -44,11 +51,14 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
 export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<ProjectConfig>(defaultConfig);
-  const [showWizard, setShowWizard] = useState(false);
   const [inWorkspace, setInWorkspace] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [documentText, setDocumentText] = useState<string | null>(null);
   const [docxBuffer, setDocxBuffer] = useState<ArrayBuffer | null>(null);
+  const [detectedTipo, setDetectedTipo] = useState<string>("");
+  const [detectedNorm, setDetectedNorm] = useState<string>("");
+  const [detectedCarrera, setDetectedCarrera] = useState<string>("");
+  const [detectedTema, setDetectedTema] = useState<string>("");
   const [showChat, setShowChat] = useState(true);
   const [showFeedback, setShowFeedback] = useState(true);
 
@@ -58,11 +68,14 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const resetProject = () => {
     setConfig(defaultConfig);
-    setShowWizard(false);
     setInWorkspace(false);
     setFileName(null);
     setDocumentText(null);
     setDocxBuffer(null);
+    setDetectedTipo("");
+    setDetectedNorm("");
+    setDetectedCarrera("");
+    setDetectedTema("");
     setShowChat(true);
     setShowFeedback(true);
   };
@@ -72,8 +85,6 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       value={{
         config,
         updateConfig,
-        showWizard,
-        setShowWizard,
         inWorkspace,
         setInWorkspace,
         fileName,
@@ -82,6 +93,14 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setDocumentText,
         docxBuffer,
         setDocxBuffer,
+        detectedTipo,
+        setDetectedTipo,
+        detectedNorm,
+        setDetectedNorm,
+        detectedCarrera,
+        setDetectedCarrera,
+        detectedTema,
+        setDetectedTema,
         showChat,
         setShowChat,
         showFeedback,

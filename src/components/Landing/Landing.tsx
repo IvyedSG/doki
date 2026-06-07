@@ -4,7 +4,7 @@ import { extractTextFromDocx } from "../../services/docx";
 import { IconFileUpload } from "@tabler/icons-react";
 
 export const Landing: React.FC = () => {
-  const { setFileName, setDocumentText, setDocxBuffer, setShowWizard } = useProject();
+  const { setFileName, setDocumentText, setDocxBuffer, setInWorkspace } = useProject();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
@@ -15,19 +15,18 @@ export const Landing: React.FC = () => {
     try {
       let text: string;
       if (file.name.endsWith(".docx")) {
-        // guardamos los bytes para el render fiel (docx-preview), además del texto para analizar
         setDocxBuffer(await file.arrayBuffer());
         text = await extractTextFromDocx(file);
       } else {
-        setDocxBuffer(null); // .txt/.md no tienen formato Word
+        setDocxBuffer(null);
         text = await file.text();
       }
       setDocumentText(text.normalize("NFC"));
-      setShowWizard(true);
+      setInWorkspace(true);
     } catch {
       setDocxBuffer(null);
       setDocumentText("[Error al leer el archivo]");
-      setShowWizard(true);
+      setInWorkspace(true);
     }
   };
 
@@ -50,14 +49,17 @@ export const Landing: React.FC = () => {
     setFileName("tesis_investigacion_final_v3.txt");
     setDocxBuffer(null);
     setDocumentText(
-      "APLICACIÓN DE ESCRITORIO BASADA EN INTELIGENCIA ARTIFICIAL Y SU EFECTO EN LA NORMALIZACIÓN DE DOCUMENTOS ACADÉMICOS\n\n"
-      + "1. INTRODUCCIÓN\n\n"
+      "# APLICACIÓN DE ESCRITORIO BASADA EN INTELIGENCIA ARTIFICIAL Y SU EFECTO EN LA NORMALIZACIÓN DE DOCUMENTOS ACADÉMICOS\n\n"
+      + "## 1. INTRODUCCIÓN\n\n"
       + "La escritura académica constituye una competencia central en la formación universitaria, dado que articula el pensamiento crítico, la apropiación del conocimiento disciplinar y la comunicación científica entre pares.\n\n"
       + "Su dominio en estudiantes universitarios influye directamente en la calidad de informes, ensayos, monografías y trabajos de fin de carrera, y representa una habilidad cuya consolidación define la transición entre el aprendizaje superior y el ejercicio profesional.\n\n"
-      + "El conjunto de variables propuestas fueron analizadas mediante el software estadístico. Los resultados son bien interesantes para la investigación porque muestran un montón de información relevante.\n\n"
-      + "2.1. Marco Teórico\n2.1.1 Antecedentes\n2.1.2 Bases teóricas\n2.2 Metodología"
+      + "El conjunto de variables propuestas fueron analizadas mediante el software estadístico. Los resultados son **bien interesantes** para la investigación porque muestran un montón de información relevante.\n\n"
+      + "### 2.1. Marco Teórico\n\n"
+      + "#### 2.1.1 Antecedentes\n\n"
+      + "#### 2.1.2 Bases teóricas\n\n"
+      + "### 2.2 Metodología"
     );
-    setShowWizard(true);
+    setInWorkspace(true);
   };
 
   return (

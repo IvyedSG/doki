@@ -166,6 +166,7 @@ export interface components {
             motores_fallidos: string[];
             /** Nota */
             nota?: string | null;
+            revision?: components["schemas"]["RevisionDocumento"] | null;
         };
         /** ChatRequest */
         ChatRequest: {
@@ -180,6 +181,7 @@ export interface components {
             /** Respuesta */
             respuesta: string;
         };
+        /** ContextoChat */
         ContextoChat: {
             /** Documento */
             documento?: string | null;
@@ -236,6 +238,22 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HallazgoRevision
+         * @description Un hallazgo de la revisión holística (estilo example-analysis.md).
+         */
+        HallazgoRevision: {
+            /** Titulo */
+            titulo: string;
+            /**
+             * Seccion
+             * @default
+             */
+            seccion: string;
+            /** Descripcion */
+            descripcion: string;
+            severidad: components["schemas"]["SeveridadHallazgo"];
+        };
         /** MensajeChat */
         MensajeChat: {
             /** Rol */
@@ -276,6 +294,18 @@ export interface components {
             reescritura_formal: string;
             /** Nota */
             nota: string;
+        };
+        /**
+         * RevisionDocumento
+         * @description Revisión holística del documento completo (nivel PR review académico).
+         */
+        RevisionDocumento: {
+            /** Resumen */
+            resumen: string;
+            /** Hallazgos */
+            hallazgos: components["schemas"]["HallazgoRevision"][];
+            /** Veredicto */
+            veredicto: string;
         };
         /** SaludResponse */
         SaludResponse: {
@@ -342,6 +372,12 @@ export interface components {
          * @enum {string}
          */
         Severidad: "error" | "advertencia" | "sugerencia";
+        /**
+         * SeveridadHallazgo
+         * @description Severidad para la revisión holística (estilo PR review).
+         * @enum {string}
+         */
+        SeveridadHallazgo: "bloqueante" | "corregir" | "menor";
         /** Sugerencia */
         Sugerencia: {
             /**

@@ -16,10 +16,13 @@ type S = components["schemas"];
 // Enums / primitivos
 export type Dimension = S["Dimension"];
 export type Severidad = S["Severidad"];
+export type SeveridadHallazgo = S["SeveridadHallazgo"];
 export type Nivel = S["Nivel"];
 export type Fuente = S["Fuente"];
 export type Rango = S["Rango"];
 export type Sugerencia = S["Sugerencia"];
+export type HallazgoRevision = S["HallazgoRevision"];
+export type RevisionDocumento = S["RevisionDocumento"];
 export type SeccionEsperada = S["SeccionEsperada"];
 
 // Operaciones principales
