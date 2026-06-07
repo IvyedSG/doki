@@ -61,6 +61,35 @@ export const api = {
       signal,
     }),
 
+  // Convierte un .docx a Markdown limpio con pandoc (en el back). Texto canónico para vista +
+  // análisis: el modelo holístico lo evalúa bien (el markdown de mammoth lo hacía "resumir").
+  convertir: async (file: File): Promise<string> => {
+    const res = await fetch(`${BASE_URL}/convertir`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: await file.arrayBuffer(),
+    });
+    if (!res.ok) throw new ApiError(res.status, `Error ${res.status}`);
+    const data = (await res.json()) as { markdown: string };
+    return data.markdown;
+  },
+
+  // Detecta la normativa por patrón de cita (regla en el back, determinista). Devuelve la
+  // normativa + la EVIDENCIA (conteos) para mostrarla, no una caja negra. NO usa el modelo.
+  detectarNormativa: async (
+    texto: string,
+    signal?: AbortSignal,
+  ): Promise<{ normativa: string | null; ieee: number; apa: number; confianza: number }> => {
+    const res = await fetch(`${BASE_URL}/detectar-normativa`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: texto,
+      signal,
+    });
+    if (!res.ok) throw new ApiError(res.status, `Error ${res.status}`);
+    return (await res.json()) as { normativa: string | null; ieee: number; apa: number; confianza: number };
+  },
+
   reescribir: (data: ReescribirRequest) =>
     request<ReescribirResponse>("/reescribir", {
       method: "POST",

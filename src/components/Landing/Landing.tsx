@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { useProject } from "../../context/ProjectContext";
-import { extractTextFromDocx } from "../../services/docx";
+import { docxToMarkdown } from "../../services/docx";
 import { IconFileUpload } from "@tabler/icons-react";
 
 export const Landing: React.FC = () => {
@@ -16,7 +16,7 @@ export const Landing: React.FC = () => {
       let text: string;
       if (file.name.endsWith(".docx")) {
         setDocxBuffer(await file.arrayBuffer());
-        text = await extractTextFromDocx(file);
+        text = await docxToMarkdown(file);  // pandoc (back) -> limpio; fallback mammoth
       } else {
         setDocxBuffer(null);
         text = await file.text();

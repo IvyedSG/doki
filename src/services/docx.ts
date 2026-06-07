@@ -1,3 +1,18 @@
+import { api } from "./api";
+
+/**
+ * Markdown del .docx para vista + análisis. PRIMERO pandoc (en el back): texto limpio y estable
+ * que el modelo holístico evalúa bien. Si el back no está disponible, cae a mammoth en el navegador
+ * (markdown más sucio: blockquotes, párrafos partidos finos -> el modelo tiende a "resumir").
+ */
+export async function docxToMarkdown(file: File): Promise<string> {
+  try {
+    return (await api.convertir(file)).normalize("NFC");
+  } catch {
+    return await extractTextFromDocx(file);
+  }
+}
+
 export async function extractTextFromDocx(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const mammoth = await import("mammoth");

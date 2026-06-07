@@ -37,26 +37,40 @@ function renderInline(text: string) {
   return parts.length > 0 ? parts : text;
 }
 
+// Limpia el "ruido" del Markdown de pandoc para mostrarlo legible:
+//  - imágenes  ![alt](media/..){width=..}  -> se quitan (no se renderizan en la vista de texto)
+//  - links     [texto](url)                 -> solo el texto
+//  - atributos {#ancla} {width=..}          -> se quitan
+//  - blockquote "> " del índice             -> se quita el prefijo
+function limpiarLineaPandoc(t: string): string {
+  let s = t.replace(/^>\s?/, "");                                  // blockquote
+  s = s.replace(/!\[[^\]]*\]\([^)]*\)\s*(\{[^}]*\})?/g, "");        // imágenes
+  s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");                    // links -> texto
+  s = s.replace(/\{[^}]*\}/g, "");                                  // {#ancla} {width=..}
+  return s.trim();
+}
+
 function renderMarkdown(text: string): React.ReactNode {
   const lines = text.split("\n");
   const out: React.ReactNode[] = [];
-  let inList = false;
   for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (!t) {
-      if (inList) { inList = false; }
-      out.push(<div key={i} className="h-3" />);
+    const raw = lines[i].trim();
+    const heading = /^(#{1,3})\s+/.exec(raw);
+    const bullet = /^[-*+]\s+/.test(raw) || /^\d+[.)]\s+/.test(raw);
+    const t = limpiarLineaPandoc(raw);
+    if (!t) { out.push(<div key={i} className="h-3" />); continue; }
+    if (heading) {
+      const lvl = heading[1].length;
+      const txt = t.replace(/^#{1,3}\s+/, "");
+      if (lvl === 1) out.push(<h1 key={i} className="text-lg font-bold mt-5 mb-2">{renderInline(txt)}</h1>);
+      else if (lvl === 2) out.push(<h2 key={i} className="text-base font-bold mt-4 mb-1">{renderInline(txt)}</h2>);
+      else out.push(<h3 key={i} className="text-sm font-bold mt-3 mb-1">{renderInline(txt)}</h3>);
       continue;
     }
-    if (t.startsWith("# ")) { inList = false; out.push(<h1 key={i} className="text-lg font-bold mt-5 mb-2">{renderInline(t.slice(2))}</h1>); continue; }
-    if (t.startsWith("## ")) { inList = false; out.push(<h2 key={i} className="text-base font-bold mt-4 mb-1">{renderInline(t.slice(3))}</h2>); continue; }
-    if (t.startsWith("### ")) { inList = false; out.push(<h3 key={i} className="text-sm font-bold mt-3 mb-1">{renderInline(t.slice(4))}</h3>); continue; }
-    if (t.startsWith("- ") || t.startsWith("* ")) {
-      inList = true;
-      out.push(<li key={i} className="ml-5 text-[13px] mb-0.5 list-disc">{renderInline(t.slice(2))}</li>);
+    if (bullet) {
+      out.push(<li key={i} className="ml-5 text-[13px] mb-0.5 list-disc">{renderInline(t.replace(/^([-*+]|\d+[.)])\s+/, ""))}</li>);
       continue;
     }
-    inList = false;
     out.push(<p key={i} className="text-[13px] mb-1 leading-relaxed">{renderInline(t)}</p>);
   }
   return out;
@@ -185,7 +199,7 @@ function ThinkingDots() {
 }
 
 export const Workspace: React.FC = () => {
-  const { config, documentText, docxBuffer, showChat, fileName } = useProject();
+  const { config, documentText, docxBuffer, showChat, fileName, detectedNorm, setDetectedNorm } = useProject();
   const containerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const docxRef = useRef<HTMLDivElement>(null);
@@ -207,6 +221,7 @@ export const Workspace: React.FC = () => {
   const [secciones, setSecciones] = useState<SeccionInfo[]>([]);
 
   const [thinkingText, setThinkingText] = useState("");
+  const [normEvidencia, setNormEvidencia] = useState("");  // evidencia del estilo de cita (tooltip)
   // Progreso del análisis por secciones (intro -> método -> …)
   const [progreso, setProgreso] = useState<{ total: number; hechas: number; actual: string }>({
     total: 0,
@@ -221,6 +236,18 @@ export const Workspace: React.FC = () => {
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     let cancelado = false;
+
+    // Normativa: detección determinista por patrón de cita (regla en el back). Fire-and-forget,
+    // no bloquea el análisis. Hasta que responda, el chip muestra "Detectando…".
+    setDetectedNorm("");
+    setNormEvidencia("");
+    api.detectarNormativa(texto, signal)
+      .then((d) => {
+        if (cancelado || !d.normativa) return;
+        setDetectedNorm(d.normativa);
+        setNormEvidencia(`${d.ieee} citas numéricas [N] vs ${d.apa} autor-año · ${Math.round(d.confianza * 100)}% de confianza`);
+      })
+      .catch(() => { /* sin red: el chip queda en "Detectando…" */ });
 
     const run = async () => {
       setStatus("loading");
@@ -734,8 +761,17 @@ export const Workspace: React.FC = () => {
         <div ref={docScrollRef} className="flex-1 overflow-y-auto">
           {/* Barra: metadatos + alternar vista (Fiel = render Word / Marcado = texto con marcas) */}
           <div className="px-5 pt-7 pb-3 max-w-[980px] mx-auto flex items-center gap-3 flex-wrap">
-            <span className="inline-block text-[10px] text-accent bg-accent/5 px-3 py-1.5 rounded-sm font-medium tracking-wider uppercase">
-              {config.norm === "apa7" ? "APA 7" : config.norm}
+            {/* Normativa DETECTADA por patrón de cita en el back (regla determinista y AUDITABLE:
+                [N]=IEEE, (Autor, año)=APA). El tooltip muestra la evidencia (conteos), no es caja
+                negra. "Detectando…" mientras llega; nunca un default inventado. */}
+            <span
+              title={normEvidencia ? `Detectado por el patrón de cita: ${normEvidencia}` : "Detectando la normativa por el patrón de cita…"}
+              className="inline-flex items-center gap-1.5 text-[10px] text-accent bg-accent/5 px-3 py-1.5 rounded-sm font-medium tracking-wider uppercase cursor-help"
+            >
+              {detectedNorm
+                ? ({ apa7: "APA 7", ieee: "IEEE", vancouver: "Vancouver", chicago: "Chicago" }[detectedNorm] ?? detectedNorm.toUpperCase())
+                : "Detectando…"}
+              {normEvidencia && <span className="text-text-hint normal-case font-normal tracking-normal">· {normEvidencia.split(" · ")[1]}</span>}
             </span>
             <span className="inline-block text-[10px] text-text-hint bg-bg2 px-3 py-1.5 rounded-sm font-medium">
               {config.carrera}
@@ -813,17 +849,8 @@ export const Workspace: React.FC = () => {
                 {(() => {
                   const rev = revision;
                   if (!rev || secciones.length === 0) {
-                    // Simple markdown rendering when no highlights
-                    const mdLines = documentText.split("\n");
-                    return mdLines.map((line, i) => {
-                      const t = line.trim();
-                      if (!t) return <div key={i} className="h-4" />;
-                      if (t.startsWith("# ")) return <h1 key={i} className="text-lg font-bold mt-6 mb-3">{t.slice(2)}</h1>;
-                      if (t.startsWith("## ")) return <h2 key={i} className="text-base font-bold mt-5 mb-2">{t.slice(3)}</h2>;
-                      if (t.startsWith("### ")) return <h3 key={i} className="text-sm font-bold mt-4 mb-1">{t.slice(4)}</h3>;
-                      if (t.startsWith("- ") || t.startsWith("* ")) return <li key={i} className="ml-4 text-[13px] mb-0.5">{t.slice(2)}</li>;
-                      return <p key={i} className="text-[13px] mb-1 leading-relaxed">{renderInline(t)}</p>;
-                    });
+                    // Sin resaltados: render limpio (quita imágenes/links/{attrs} de pandoc).
+                    return renderMarkdown(documentText);
                   }
 
                   // Build section segments with highlights
@@ -861,7 +888,7 @@ export const Workspace: React.FC = () => {
                         <span
                           key={si}
                           id={`sec-${seg.idx}`}
-                          className="bg-accent/5 block rounded-sm px-4 -mx-4 py-2 my-3 border-l-2 border-accent/40 scroll-mt-12"
+                          className="block border-l-2 border-accent/30 pl-3 -ml-3 scroll-mt-12"
                         >
                           {renderMarkdown(text)}
                         </span>
