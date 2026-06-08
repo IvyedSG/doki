@@ -1,32 +1,39 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { useProject } from "../../context/ProjectContext";
-import { docxToMarkdown } from "../../services/docx";
-import { IconFileUpload } from "@tabler/icons-react";
+import { convertirDocumento, detectarFormato, mensajeConversion } from "../../services/docx";
+import { IconFileUpload, IconLoader2 } from "@tabler/icons-react";
 
 export const Landing: React.FC = () => {
   const { setFileName, setDocumentText, setDocxBuffer, setInWorkspace } = useProject();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [isConverting, setIsConverting] = useState(false);
+  const [conversionMessage, setConversionMessage] = useState("");
 
   const handleFile = async (file: File) => {
-    if (!file.name.endsWith(".txt") && !file.name.endsWith(".md") && !file.name.endsWith(".docx")) return;
+    const formato = detectarFormato(file);
+    if (formato === "desconocido") return;
 
     setFileName(file.name);
+    setIsConverting(true);
+    setConversionMessage(mensajeConversion(file));
 
     try {
-      let text: string;
-      if (file.name.endsWith(".docx")) {
+      if (formato === "backend-fallback" || formato === "backend-only") {
         setDocxBuffer(await file.arrayBuffer());
-        text = await docxToMarkdown(file);  // pandoc (back) -> limpio; fallback mammoth
       } else {
         setDocxBuffer(null);
-        text = await file.text();
       }
+
+      const text = await convertirDocumento(file);
       setDocumentText(text.normalize("NFC"));
       setInWorkspace(true);
     } catch {
       setDocxBuffer(null);
       setDocumentText("[Error al leer el archivo]");
       setInWorkspace(true);
+    } finally {
+      setIsConverting(false);
+      setConversionMessage("");
     }
   };
 
@@ -37,29 +44,13 @@ export const Landing: React.FC = () => {
   };
 
   const handleClick = () => {
+    if (isConverting) return;
     inputRef.current?.click();
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) handleFile(file);
-  };
-
-  const loadDemo = () => {
-    setFileName("tesis_investigacion_final_v3.txt");
-    setDocxBuffer(null);
-    setDocumentText(
-      "# APLICACIÓN DE ESCRITORIO BASADA EN INTELIGENCIA ARTIFICIAL Y SU EFECTO EN LA NORMALIZACIÓN DE DOCUMENTOS ACADÉMICOS\n\n"
-      + "## 1. INTRODUCCIÓN\n\n"
-      + "La escritura académica constituye una competencia central en la formación universitaria, dado que articula el pensamiento crítico, la apropiación del conocimiento disciplinar y la comunicación científica entre pares.\n\n"
-      + "Su dominio en estudiantes universitarios influye directamente en la calidad de informes, ensayos, monografías y trabajos de fin de carrera, y representa una habilidad cuya consolidación define la transición entre el aprendizaje superior y el ejercicio profesional.\n\n"
-      + "El conjunto de variables propuestas fueron analizadas mediante el software estadístico. Los resultados son **bien interesantes** para la investigación porque muestran un montón de información relevante.\n\n"
-      + "### 2.1. Marco Teórico\n\n"
-      + "#### 2.1.1 Antecedentes\n\n"
-      + "#### 2.1.2 Bases teóricas\n\n"
-      + "### 2.2 Metodología"
-    );
-    setInWorkspace(true);
   };
 
   return (
@@ -75,29 +66,35 @@ export const Landing: React.FC = () => {
           Subí tu trabajo y nosotros nos encargamos del formato.
         </p>
 
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-          onClick={handleClick}
-          className="w-full bg-bg2/30 hover:bg-bg3 rounded-sm px-12 py-24 text-center cursor-pointer transition-all duration-200 group relative mt-12"
-        >
-          <input ref={inputRef} type="file" accept=".docx,.txt,.md"
-            className="hidden" onChange={handleInputChange}
-          />
-          <IconFileUpload size={56} className="mx-auto mb-6 text-text-hint group-hover:text-accent transition-colors" />
-          <p className="text-body font-medium text-text-main mb-2">
-            Arrastrá tu documento académico
-          </p>
-          <p className="text-label text-text-hint">
-            o hacé clic para buscar &middot; compatible con .docx .txt .md
-          </p>
-        </div>
-
-        <button onClick={loadDemo}
-          className="text-label text-text-muted hover:text-accent transition-colors underline underline-offset-4 decoration-border-active hover:decoration-accent mt-10 relative"
-        >
-          Cargar documento de demostración
-        </button>
+        {isConverting ? (
+          <div className="w-full bg-bg2/30 rounded-sm px-12 py-24 text-center mt-12">
+            <IconLoader2 size={48} className="mx-auto mb-6 text-accent animate-spin" />
+            <p className="text-body font-medium text-text-main mb-2">
+              {conversionMessage}
+            </p>
+            <p className="text-label text-text-hint">
+              Esto puede tomar unos segundos dependiendo del archivo
+            </p>
+          </div>
+        ) : (
+          <div
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            onClick={handleClick}
+            className="w-full bg-bg2/30 hover:bg-bg3 rounded-sm px-12 py-24 text-center cursor-pointer transition-all duration-200 group relative mt-12"
+          >
+            <input ref={inputRef} type="file" accept=".docx,.txt,.md,.pdf,.pptx,.xlsx,.html,.htm,.csv,.epub"
+              className="hidden" onChange={handleInputChange}
+            />
+            <IconFileUpload size={56} className="mx-auto mb-6 text-text-hint group-hover:text-accent transition-colors" />
+            <p className="text-body font-medium text-text-main mb-2">
+              Arrastrá tu documento académico
+            </p>
+            <p className="text-label text-text-hint">
+              o hacé clic para buscar &middot; compatible con .docx .pdf .txt .md .pptx .xlsx .html
+            </p>
+          </div>
+        )}
 
       </div>
     </div>

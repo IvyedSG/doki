@@ -43,7 +43,7 @@ interface ProjectContextType {
 const defaultConfig: ProjectConfig = {
   docType: "tesis",
   norm: "apa7",
-  carrera: "Ingeniería de Software",
+  carrera: "General",
   detailLevel: "profundo",
 };
 

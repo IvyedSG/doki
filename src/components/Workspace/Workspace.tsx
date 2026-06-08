@@ -1,14 +1,12 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useProject } from "../../context/ProjectContext";
 import { api } from "../../services/api";
-import { renderDocx } from "../../services/docxView";
 import { mapDocType } from "../../types/mapping";
 import type { Sugerencia, MensajeChat as Mensaje, RevisionDocumento, SeccionInfo } from "../../types/api";
 import {
   IconArrowUp,
   IconAlertTriangle,
   IconDatabaseOff,
-  IconInfoCircle,
   IconMinus,
   IconPlus,
 } from "@tabler/icons-react";
@@ -16,7 +14,80 @@ import {
 type WorkspaceStatus = "loading" | "success" | "error" | "partial";
 
 function normSec(s: string): string {
-  return s.replace(/\.(?=\s|$)/g, "").trim().toLowerCase();
+  return s.replace(/\./g, "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function matchSeccion(seccionName: string, secciones: SeccionInfo[], documentText?: string): number {
+  const n = normSec(seccionName);
+  if (!n || secciones.length === 0) return -1;
+
+  // 1) Bidirectional include on title
+  let idx = secciones.findIndex(s =>
+    normSec(s.titulo).includes(n) || n.includes(normSec(s.titulo))
+  );
+  if (idx >= 0) return idx;
+
+  // 2) Text-search: find the section name in the raw document, then check which
+  //    detected section's byte range contains it. Catches table-captions etc.
+  if (documentText) {
+    const rawPos = findTextInDoc(documentText, seccionName);
+    if (rawPos >= 0) {
+      const found = secciones.find(s => s.inicio <= rawPos && rawPos < s.fin);
+      if (found) return found.idx;
+    }
+  }
+
+  // 3) Word overlap on title
+  const words = n.split(/[\s,/;:()]+/).filter(w => w.length > 3);
+  if (words.length > 0) {
+    let bestScore = 0;
+    let bestIdx = -1;
+    for (const [i, s] of secciones.entries()) {
+      const st = normSec(s.titulo);
+      const score = words.filter(w => st.includes(w)).length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    if (bestScore >= Math.min(2, words.length)) return bestIdx;
+  }
+
+  return -1;
+}
+
+function findTextInDoc(doc: string, search: string): number {
+  if (!search) return -1;
+  const lo = (s: string) => s.replace(/\./g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const nd = lo(doc);
+  const ns = lo(search);
+  // Try direct, lowercase, then aggressive normalization (strip ALL dots)
+  let pos = doc.indexOf(search);
+  if (pos >= 0) return pos;
+  pos = doc.toLowerCase().indexOf(search.toLowerCase());
+  if (pos >= 0) return pos;
+  // Aggressive: strip ALL dots from both, find in normalized, approximate position
+  pos = nd.indexOf(ns);
+  if (pos >= 0) {
+    const before = doc.lastIndexOf("\n", pos);
+    return before >= 0 ? before + 1 : 0;
+  }
+  // If comma-separated list (e.g. "P17, P23, P24"), try first few items individually
+  if (search.includes(",")) {
+    const items = search.split(",").map(s => s.trim()).filter(Boolean);
+    for (const item of items.slice(0, 3)) {
+      pos = findTextInDoc(doc, item);
+      if (pos >= 0) return pos;
+    }
+  }
+  // First 2 significant words as last resort
+  const words = search.split(/[\s]+/).filter(w => w.replace(/[^a-záéíóúñA-ZÁÉÍÓÚÑ0-9]/g, "").length > 2);
+  if (words.length >= 2) {
+    const two = words.slice(0, 2).join(" ");
+    pos = doc.toLowerCase().indexOf(two.toLowerCase());
+    if (pos >= 0) return pos;
+  }
+  return -1;
 }
 
 function renderInline(text: string) {
@@ -50,36 +121,70 @@ function limpiarLineaPandoc(t: string): string {
   return s.trim();
 }
 
-function renderMarkdown(text: string): React.ReactNode {
+const COLOR_SEV_HL: Record<string, string> = { bloqueante: "#e05555", corregir: "#f0a050", menor: "#4ecba8" };
+
+function renderMarkdown(
+  text: string,
+  highlightLines?: Map<number, string>,
+  _unused?: undefined,
+  secIdxToLine?: [number, number][],
+  fiel?: boolean,
+): React.ReactNode {
   const lines = text.split("\n");
   const out: React.ReactNode[] = [];
+  // Build a set of line indices that are the FIRST highlight for each section
+  const firstHlLine = new Set<number>();
+  const hlToSecIdx = new Map<number, number>();
+  if (secIdxToLine) {
+    for (const [secIdx, line] of secIdxToLine) {
+      if (!firstHlLine.has(line)) {
+        firstHlLine.add(line);
+        hlToSecIdx.set(line, secIdx);
+      }
+    }
+  }
+  const hl = (i: number, node: React.ReactNode) => {
+    if (!highlightLines?.has(i)) return node;
+    const color = highlightLines.get(i)!;
+    const extraId = hlToSecIdx.has(i) ? { id: `sec-${hlToSecIdx.get(i)}` } : {};
+    return (
+      <span key={i} className="block -mx-2 px-2 rounded-sm scroll-mt-12" style={{ backgroundColor: color + "22" }} {...extraId}>
+        {node}
+      </span>
+    );
+  };
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i].trim();
     const heading = /^(#{1,3})\s+/.exec(raw);
     const bullet = /^[-*+]\s+/.test(raw) || /^\d+[.)]\s+/.test(raw);
-    const t = limpiarLineaPandoc(raw);
-    if (!t) { out.push(<div key={i} className="h-3" />); continue; }
+    const t = fiel ? raw : limpiarLineaPandoc(raw);
+    if (!t) { out.push(hl(i, <div key={i} className="h-3" />)); continue; }
     if (heading) {
       const lvl = heading[1].length;
       const txt = t.replace(/^#{1,3}\s+/, "");
-      if (lvl === 1) out.push(<h1 key={i} className="text-lg font-bold mt-5 mb-2">{renderInline(txt)}</h1>);
-      else if (lvl === 2) out.push(<h2 key={i} className="text-base font-bold mt-4 mb-1">{renderInline(txt)}</h2>);
-      else out.push(<h3 key={i} className="text-sm font-bold mt-3 mb-1">{renderInline(txt)}</h3>);
+      if (lvl === 1) out.push(hl(i, <h1 key={i} className="text-lg font-bold mt-5 mb-2">{renderInline(txt)}</h1>));
+      else if (lvl === 2) out.push(hl(i, <h2 key={i} className="text-base font-bold mt-4 mb-1">{renderInline(txt)}</h2>));
+      else out.push(hl(i, <h3 key={i} className="text-sm font-bold mt-3 mb-1">{renderInline(txt)}</h3>));
       continue;
     }
     if (bullet) {
-      out.push(<li key={i} className="ml-5 text-[13px] mb-0.5 list-disc">{renderInline(t.replace(/^([-*+]|\d+[.)])\s+/, ""))}</li>);
+      out.push(hl(i, <li key={i} className="ml-5 text-[13px] mb-0.5 list-disc">{renderInline(t.replace(/^([-*+]|\d+[.)])\s+/, ""))}</li>));
       continue;
     }
-    out.push(<p key={i} className="text-[13px] mb-1 leading-relaxed">{renderInline(t)}</p>);
+    out.push(hl(i, <p key={i} className="text-[13px] mb-1 leading-relaxed">{renderInline(t)}</p>));
   }
   return out;
+}
+
+function _capitalizar(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function buildAnalisisDetallado(
   rev: RevisionDocumento,
   secciones: SeccionInfo[],
   meta: { tipo: string; carrera: string; fileName: string | null },
+  documentText?: string,
 ): string {
   const L: string[] = [];
 
@@ -89,15 +194,15 @@ function buildAnalisisDetallado(
   };
   const tipoLabel = TIPO_LABEL[meta.tipo] || meta.tipo;
 
-  L.push(`@T|PR Review — ${tipoLabel}${meta.fileName ? ` — ${meta.fileName}` : ""}`);
-  L.push(`@P|Revisado en: Coherencia argumentativa · Organización estructural · Gramática y estilo académico · ${meta.carrera}`);
+  L.push(`@T|${tipoLabel}${meta.fileName ? ` — ${meta.fileName}` : ""}`);
+  L.push(`@P|Revisado en: Coherencia argumentativa · Organización estructural · Gramática y estilo académico · ${_capitalizar(meta.carrera)}`);
   L.push("");
   L.push("@P|Resumen general");
   L.push("@R|" + rev.resumen.replace(/\n/g, " "));
   L.push("");
 
   const ORDEN_SEV = ["bloqueante", "corregir", "menor"];
-  const ETIQ_SEV: Record<string, string> = { bloqueante: "Bloqueante", corregir: "A corregir", menor: "Menor" };
+  const ETIQ_SEV: Record<string, string> = { bloqueante: "Crítico", corregir: "A mejorar", menor: "Sugerencia" };
   const ICON_SEV: Record<string, string> = { bloqueante: "🔴", corregir: "🟡", menor: "🟢" };
   const COLOR_SEV: Record<string, string> = { bloqueante: "red", corregir: "amber", menor: "green" };
 
@@ -114,12 +219,8 @@ function buildAnalisisDetallado(
     L.push(`@F|${COLOR_SEV[h.severidad]}|${ICON_SEV[h.severidad]} ${ETIQ_SEV[h.severidad]}|${h.titulo}`);
 
     if (h.seccion) {
-      const n = normSec(h.seccion);
-      const match = n
-        ? secciones.findIndex(s => normSec(s.titulo).includes(n) || n.includes(normSec(s.titulo)))
-        : -1;
-      L.push(`@L|${h.seccion}`);
-      if (match >= 0) L.push(`@J|${match}|${h.seccion}`);
+      const match = h.seccion ? matchSeccion(h.seccion, secciones, documentText) : -1;
+      L.push(`@L|${match}|${h.seccion}`);
     }
 
     L.push(`@D|${h.descripcion}`);
@@ -130,15 +231,12 @@ function buildAnalisisDetallado(
   L.push("@P|Veredicto");
   const tabla = [
     `Severidad | Cantidad`,
-    `${ICON_SEV.bloqueante} Bloqueante | ${conteo.bloqueante}`,
-    `${ICON_SEV.corregir} A corregir | ${conteo.corregir}`,
-    `${ICON_SEV.menor} Menor | ${conteo.menor}`,
+    `${ICON_SEV.bloqueante} Crítico | ${conteo.bloqueante}`,
+    `${ICON_SEV.corregir} A mejorar | ${conteo.corregir}`,
+    `${ICON_SEV.menor} Sugerencia | ${conteo.menor}`,
   ].join("\n");
   L.push(`@V|${conteo.bloqueante}|${conteo.corregir}|${conteo.menor}|${rev.hallazgos.length}|${tabla}`);
 
-  if (rev.veredicto) {
-    L.push("@N|" + rev.veredicto.replace(/\n/g, " "));
-  }
   return L.join("\n");
 }
 
@@ -171,8 +269,8 @@ function buildResumen(sugerencias: Sugerencia[]): string {
   };
 
   const sevs: [string, string, string][] = [
-    ["error", "red", "Bloqueante"],
-    ["advertencia", "amber", "A corregir"],
+    ["error", "red", "Crítico"],
+    ["advertencia", "amber", "A mejorar"],
     ["sugerencia", "green", "Sugerencias"],
   ];
   for (const [sev, color, label] of sevs) {
@@ -198,13 +296,179 @@ function ThinkingDots() {
   return <>{dots}</>;
 }
 
+function useLineReveal(text: string, msPerLine: number = 20) {
+  const [count, setCount] = useState(0);
+  const lines = React.useMemo(() => text.split("\n"), [text]);
+
+  useEffect(() => {
+    setCount(0);
+    if (!text) return;
+    if (lines.length <= 1) { setCount(1); return; }
+    const id = setInterval(() => {
+      setCount((prev) => {
+        if (prev >= lines.length) { clearInterval(id); return lines.length; }
+        return prev + 1;
+      });
+    }, msPerLine);
+    return () => clearInterval(id);
+  }, [text, msPerLine, lines.length]);
+
+  return { revealed: lines.slice(0, count).join("\n"), done: count >= lines.length };
+}
+
+function LinesRenderer({ content, onScrollToSection }: { content: string; onScrollToSection?: (idx: number) => void }) {
+  return (
+    <div className="prose-custom leading-relaxed">
+      {content.split("\n").map((line, li) => {
+        const raw = line;
+        const t = line.trim();
+        if (!t) return <div key={li} className="h-2" />;
+        const COLOR: Record<string, string> = { red: "#e05555", amber: "#f0a050", green: "#4ecba8" };
+
+        if (line.startsWith("@T|"))
+          return (
+            <h3 key={li} className="text-text-main font-bold text-sm mt-0 mb-2 pb-2 border-b border-border-main/60 flex items-center gap-2">
+              <span>🔎</span>{line.slice(3)}
+            </h3>
+          );
+        if (line.startsWith("@R|"))
+          return <p key={li} className="text-text-main text-sm leading-relaxed mb-4 bg-bg3/50 -mx-2 px-4 py-3 rounded-sm border-l-2 border-accent/40">{line.slice(3)}</p>;
+        if (line.startsWith("@H|"))
+          return <p key={li} className="text-text-main text-sm font-bold mt-4 mb-1 leading-snug">{line.slice(3)}</p>;
+        if (line.startsWith("@P|"))
+          return <p key={li} className="text-text-muted text-sm leading-relaxed mb-2">{line.slice(3)}</p>;
+        if (line.startsWith("@V|")) {
+          const p = line.split("|");
+          const badges = [
+            { c: "red", v: p[1], l: "Crítico" },
+            { c: "amber", v: p[2], l: "A mejorar" },
+            { c: "green", v: p[3], l: "Sugerencia" },
+          ].filter(b => b.v !== "0");
+          if (badges.length === 0) return null;
+          return (
+            <div key={li} className="flex items-center gap-2 flex-wrap my-2">
+              {badges.map((b) => (
+                <span key={b.c} className="text-xs font-semibold px-3 py-1 rounded-full"
+                  style={{ backgroundColor: COLOR[b.c] + "22", color: COLOR[b.c] }}>
+                  {b.v} {b.l}
+                </span>
+              ))}
+            </div>
+          );
+        }
+        if (line.startsWith("@S|")) {
+          const p = line.split("|");
+          return (
+            <div key={li} className="flex items-center gap-2 mt-5 mb-1">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLOR[p[1]] }} />
+              <span className="text-text-main font-bold text-xs uppercase tracking-wider">{p[2]}</span>
+              <span className="text-xs text-text-hint">— {p[3]}</span>
+            </div>
+          );
+        }
+        if (line.startsWith("@F|")) {
+          const p = line.split("|");
+          return (
+            <div key={li} className="flex items-center gap-2 mt-6 mb-2 pt-3 border-t border-border-main/30">
+              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLOR[p[1]] }} />
+              <span className="text-text-main font-bold text-xs uppercase tracking-wider">{p[2]}</span>
+              <span className="text-text-main text-sm">—</span>
+              <span className="text-text-main text-sm font-semibold">{p.slice(3).join("|")}</span>
+            </div>
+          );
+        }
+        if (line.startsWith("@L|")) {
+          const parts = line.split("|");
+          const idx = parts[1] === "" || parts[1] === undefined ? -1 : parseInt(parts[1], 10);
+          const label = parts.slice(2).join("|") || "Sección";
+          if (idx >= 0) {
+            return (
+              <div key={li} className="pl-3 my-1">
+                <button onClick={() => onScrollToSection?.(idx)}
+                  className="text-xs text-accent hover:text-accent-hover font-mono bg-bg3 hover:bg-bg4 rounded px-2 py-0.5 border-0 cursor-pointer inline-flex items-center gap-1"
+                >
+                  📍 «{label}»
+                </button>
+              </div>
+            );
+          }
+          return (
+            <div key={li} className="pl-3 my-1">
+              <span className="text-xs text-text-muted font-mono bg-bg3 rounded px-2 py-0.5 inline-flex items-center gap-1">Sección: «{label}»</span>
+            </div>
+          );
+        }
+        if (line.startsWith("@D|"))
+          return <p key={li} className="text-sm text-text-muted leading-relaxed pl-3 mb-1">{line.slice(3)}</p>;
+        if (line.startsWith("@M|"))
+          return <p key={li} className="text-xs text-text-hint italic pl-3 mb-1">… y {line.slice(3)} más</p>;
+        if (line.startsWith("@OK|"))
+          return (
+            <p key={li} className="text-sm text-text-muted pl-3 mb-0.5 flex items-center gap-1.5">
+              <span className="text-teal">✓</span>{line.slice(4)}
+            </p>
+          );
+        if (line.startsWith("@N|"))
+          return <div key={li} className="mt-4 pt-3 border-t border-border-main/60 text-sm text-text-main leading-relaxed">{line.slice(3)}</div>;
+
+        if (t.startsWith("📋"))
+          return (
+            <h3 key={li} className="text-text-main font-bold text-base mb-4 mt-0 border-b border-border-main/50 pb-2">
+              {t.replace(/📋\s*/, "")}
+            </h3>
+          );
+        if (t.startsWith("🔴") || t.startsWith("🟡") || t.startsWith("🟢")) {
+          const isHeader = t.includes("—") || t.includes("·");
+          if (isHeader) {
+            return (
+              <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2 flex items-center gap-2">
+                {t.replace(/\*\*/g, "")}
+              </h4>
+            );
+          }
+        }
+        if (t.startsWith("✅"))
+          return (
+            <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2 flex items-center gap-2">{t}</h4>
+          );
+        if (t.startsWith("**Veredicto") || t.match(/^\*\*.*\*\*/))
+          return (
+            <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2">{t.replace(/\*\*/g, "")}</h4>
+          );
+        if (raw.startsWith("  ") && !t.startsWith(">") && !t.startsWith("•"))
+          return (
+            <p key={li} className="text-text-main font-semibold text-sm mt-3 mb-1 ml-4 uppercase tracking-wider">{t}</p>
+          );
+        if (t.startsWith(">"))
+          return (
+            <div key={li} className="bg-bg3 border-l-2 border-accent/40 py-1.5 px-3 my-1 ml-6 rounded-xs">
+              <span className="text-text-muted text-sm italic font-mono block whitespace-normal">{t.replace(/^>\s*/, "")}</span>
+            </div>
+          );
+        if (t.startsWith("•"))
+          return (
+            <p key={li} className="text-text-muted text-sm mb-1 ml-6 flex items-start gap-1.5">
+              <span>•</span>
+              <span>{t.replace(/^•\s*/, "")}</span>
+            </p>
+          );
+        return <p key={li} className="text-text-muted text-sm mb-1 ml-4">{t.replace(/\*\*/g, "")}</p>;
+      })}
+    </div>
+  );
+}
+
 export const Workspace: React.FC = () => {
-  const { config, documentText, docxBuffer, showChat, fileName, detectedNorm, setDetectedNorm } = useProject();
+  const {
+    config, updateConfig,
+    documentText, showChat, fileName,
+    detectedNorm, setDetectedNorm,
+    setDetectedTipo,
+    detectedCarrera, setDetectedCarrera,
+  } = useProject();
   const containerRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const docxRef = useRef<HTMLDivElement>(null);
   const docScrollRef = useRef<HTMLDivElement>(null);
-  const [vista, setVista] = useState<"fiel" | "marcado">("marcado");
   const [zoom, setZoom] = useState(1);
   const [chatPct, setChatPct] = useState(50);
   const [dragging, setDragging] = useState(false);
@@ -212,7 +476,6 @@ export const Workspace: React.FC = () => {
   const [status, setStatus] = useState<WorkspaceStatus>("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const [motoresFallidos, setMotoresFallidos] = useState<string[]>([]);
-  const [nota, setNota] = useState<string | null>(null);
   const [revision, setRevision] = useState<RevisionDocumento | null>(null);
 
   const [messages, setMessages] = useState<Mensaje[]>([]);
@@ -232,7 +495,6 @@ export const Workspace: React.FC = () => {
   useEffect(() => {
     if (!documentText) return;
     const texto = documentText;
-    const tipoDoc = mapDocType(config.docType);
     const ctrl = new AbortController();
     const signal = ctrl.signal;
     let cancelado = false;
@@ -245,7 +507,7 @@ export const Workspace: React.FC = () => {
       .then((d) => {
         if (cancelado || !d.normativa) return;
         setDetectedNorm(d.normativa);
-        setNormEvidencia(`${d.ieee} citas numéricas [N] vs ${d.apa} autor-año · ${Math.round(d.confianza * 100)}% de confianza`);
+        setNormEvidencia(`${d.ieee} citas numéricas [N] vs ${d.apa} autor-año`);
       })
       .catch(() => { /* sin red: el chip queda en "Detectando…" */ });
 
@@ -254,7 +516,6 @@ export const Workspace: React.FC = () => {
       setThinkingText("Conectando con el backend");
       setMessages([]);
       setMotoresFallidos([]);
-      setNota(null);
       setRevision(null);
       setProgreso({ total: 0, hechas: 0, actual: "" });
 
@@ -268,36 +529,65 @@ export const Workspace: React.FC = () => {
         await api.salud(signal); // si el backend no responde, lanza y cae al catch
         if (cancelado) return;
 
+        // Detectar tipo, carrera, normativa desde el contenido (modelo + reglas).
+        setThinkingText("Identificando tipo de documento y formato académico");
+        try {
+          const params = await api.detectarParametros({ texto: texto.slice(0, 5000) });
+          if (!cancelado && params) {
+            const VALID_DOC_TYPES = ["tesis", "proyecto", "informe", "ensayo", "monografia"];
+            const CARRERA_INVALID = new Set(["texto", "no_claro", "general", "", null]);
+            if (params.carrera && !CARRERA_INVALID.has(params.carrera)) {
+              setDetectedCarrera(params.carrera);
+            }
+            if (params.tipo_doc) setDetectedTipo(params.tipo_doc);
+            if (params.confianza_tipo_doc && params.confianza_tipo_doc >= 0.4 && params.tipo_doc
+                && VALID_DOC_TYPES.includes(params.tipo_doc)) {
+              updateConfig({ docType: params.tipo_doc as any });
+            }
+            if (params.confianza_carrera && params.confianza_carrera >= 0.4 && params.carrera
+                && !CARRERA_INVALID.has(params.carrera)) {
+              updateConfig({ carrera: params.carrera });
+            }
+            if (params.confianza_normativa && params.confianza_normativa >= 0.4 && params.normativa) {
+              const VALID_NORMS = ["apa7", "ieee", "vancouver", "chicago"];
+              if (VALID_NORMS.includes(params.normativa)) {
+                updateConfig({ norm: params.normativa as any });
+                setDetectedNorm(params.normativa);
+              }
+            }
+          }
+        } catch { /* fallback a defaults */ }
+
         // 1) Reglas (ortografía + gramática) sobre TODO el documento.
         setThinkingText("Revisando ortografía y gramática");
-        const r1 = await api.analizar({ texto, tipo_doc: tipoDoc, dimensiones: ["gramatica"] }, signal);
+        const r1 = await api.analizar({ texto, tipo_doc: mapDocType(config.docType), dimensiones: ["gramatica"] }, signal);
         if (cancelado) return;
         sumarFallidos(r1.motores_fallidos);
         setStatus("partial");
 
         // 2) Secciones del documento (por el índice).
+        setThinkingText("Detectando secciones del documento");
         const { secciones } = await api.secciones({ texto }, signal);
         if (cancelado) return;
         setSecciones(secciones);
 
         // 3) Pasada global: estructura, cohesión, conectores + revisión holística (todo el doc).
-        setThinkingText("Analizando estructura y cohesión");
-        const rg = await api.analizar({ texto, tipo_doc: tipoDoc, dimensiones: ["organizacion", "coherencia"], alcance: "global" }, signal);
+        setThinkingText("Evaluando normativa y estructura");
+        const rg = await api.analizar({ texto, tipo_doc: mapDocType(config.docType), dimensiones: ["organizacion", "coherencia"], alcance: "global" }, signal);
         if (cancelado) return;
         sumarFallidos(rg.motores_fallidos);
         const revisionData = rg.revision;
         if (revisionData) setRevision(revisionData);
-        if (rg.nota) setNota(rg.nota);
-
         // 4) Ideas + flujo POR SECCIÓN, progresivo (intro -> método -> …).
         if (!cancelado) setProgreso({ total: secciones.length, hechas: 0, actual: "" });
-        for (const sec of secciones) {
+        for (const [i, sec] of secciones.entries()) {
           if (cancelado) return;
+          setThinkingText(`Analizando sección ${i + 1}/${secciones.length}: ${sec.titulo}`);
           if (!cancelado) setProgreso((p) => ({ ...p, actual: sec.titulo }));
           const sub = texto.slice(sec.inicio, sec.fin);
           try {
             const rs = await api.analizar(
-              { texto: sub, tipo_doc: tipoDoc, dimensiones: ["organizacion", "coherencia"], alcance: "seccion", offset_base: sec.inicio },
+              { texto: sub, tipo_doc: mapDocType(config.docType), dimensiones: ["organizacion", "coherencia"], alcance: "seccion", offset_base: sec.inicio },
               signal,
             );
             if (cancelado) return;
@@ -310,9 +600,6 @@ export const Workspace: React.FC = () => {
         }
 
         if (cancelado) return;
-        if (secciones.length > 1) {
-          setNota(`Análisis por secciones (${secciones.length}): el modelo revisó el documento completo, parte por parte.`);
-        }
         if (fallidos.size > 0 && !revisionData) {
           setStatus("error");
           setErrorMsg("La IA local no está disponible. El análisis se limitará a reglas básicas.");
@@ -322,7 +609,7 @@ export const Workspace: React.FC = () => {
             tipo: config.docType,
             carrera: config.carrera,
             fileName,
-          }) }]);
+          }, documentText) }]);
         } else {
           setStatus("success");
           setMessages([{ rol: "asistente", contenido: buildResumen([]) }]);
@@ -348,36 +635,7 @@ export const Workspace: React.FC = () => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Render FIEL del .docx (docx-preview) cuando está en vista "fiel" y hay bytes del archivo.
-  useEffect(() => {
-    if (vista !== "fiel" || !docxBuffer || !docxRef.current) return;
-    let cancel = false;
-    const host = docxRef.current;
-    host.innerHTML =
-      '<p class="text-text-hint text-label px-2 py-10 text-center">Cargando vista fiel…</p>';
-    renderDocx(host, docxBuffer).catch(() => {
-      if (!cancel)
-        host.innerHTML =
-          '<p class="text-text-muted text-body px-2 py-10 text-center">No se pudo renderizar la vista fiel del documento.</p>';
-    });
-    return () => {
-      cancel = true;
-    };
-  }, [docxBuffer, vista]);
-
-  // Al alternar Fiel/Marcado, volver al inicio del documento (si no, queda scrolleado abajo
-  // donde estabas en la otra vista y parece que "no cambió"). useLayoutEffect corre ANTES de
-  // pintar -> el usuario nunca ve la posición vieja. El rAF reasegura cuando el render fiel
-  // (docx-preview, asíncrono) crece después.
-  useLayoutEffect(() => {
-    const el = docScrollRef.current;
-    if (!el) return;
-    el.scrollTop = 0;
-    const id = requestAnimationFrame(() => {
-      el.scrollTop = 0;
-    });
-    return () => cancelAnimationFrame(id);
-  }, [vista]);
+  // (docx-preview eliminado — siempre se renderiza el texto convertido)
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -433,15 +691,20 @@ export const Workspace: React.FC = () => {
     }
   };
 
-  // Vista fiel solo si hay bytes del .docx (los .txt/.md/demo van siempre a "marcado").
-  const fiel = vista === "fiel" && !!docxBuffer;
-
   const scrollToSection = (idx: number) => {
-    setVista("marcado");
-    requestAnimationFrame(() =>
-      document.getElementById(`sec-${idx}`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    );
+    const el = document.getElementById(`sec-${idx}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-2", "ring-accent/40", "rounded-sm");
+      setTimeout(() => el.classList.remove("ring-2", "ring-accent/40", "rounded-sm"), 2000);
+    }
   };
+
+  function AssistantMessageContent({ content, animate }: { content: string; animate: boolean }) {
+    const { revealed, done } = useLineReveal(animate ? content : "", 15);
+    const display = animate && !done ? revealed : content;
+    return <LinesRenderer content={display} onScrollToSection={scrollToSection} />;
+  }
 
   return (
     <div ref={containerRef} className="flex h-full">
@@ -530,177 +793,7 @@ export const Workspace: React.FC = () => {
                   }`}
                 >
                   {msg.rol === "asistente" ? (
-                    <div className="prose-custom leading-relaxed">
-                      {msg.contenido.split("\n").map((line, li) => {
-                        const raw = line;
-                        const t = line.trim();
-                        if (!t) return <div key={li} className="h-2" />;
-
-                        // ── Informe estilo PR (protocolo @TIPO|campos que emite buildResumen) ──
-                        const COLOR: Record<string, string> = { red: "#e05555", amber: "#f0a050", green: "#4ecba8" };
-                        if (line.startsWith("@T|"))
-                          return (
-                            <h3 key={li} className="text-text-main font-bold text-sm mt-0 mb-2 pb-2 border-b border-border-main/60 flex items-center gap-2">
-                              <span>🔎</span>{line.slice(3)}
-                            </h3>
-                          );
-                        if (line.startsWith("@R|"))
-                          return <p key={li} className="text-text-main text-sm leading-relaxed mb-4 bg-bg3/50 -mx-2 px-4 py-3 rounded-sm border-l-2 border-accent/40">{line.slice(3)}</p>;
-                        if (line.startsWith("@H|"))
-                          return <p key={li} className="text-text-main text-sm font-bold mt-4 mb-1 leading-snug">{line.slice(3)}</p>;
-                        if (line.startsWith("@P|"))
-                          return <p key={li} className="text-text-muted text-sm leading-relaxed mb-2">{line.slice(3)}</p>;
-                        if (line.startsWith("@V|")) {
-                          const p = line.split("|");
-                          const badges = [
-                            { c: "red", v: p[1], l: "bloqueante" },
-                            { c: "amber", v: p[2], l: "a corregir" },
-                            { c: "green", v: p[3], l: "menor" },
-                          ].filter(b => b.v !== "0");
-                          if (badges.length === 0) return null;
-                          return (
-                            <div key={li} className="flex items-center gap-2 flex-wrap my-2">
-                              {badges.map((b) => (
-                                <span key={b.c} className="text-xs font-semibold px-3 py-1 rounded-full"
-                                  style={{ backgroundColor: COLOR[b.c] + "22", color: COLOR[b.c] }}>
-                                  {b.v} {b.l}
-                                </span>
-                              ))}
-                            </div>
-                          );
-                        }
-                        if (line.startsWith("@S|")) {
-                          const p = line.split("|");
-                          return (
-                            <div key={li} className="flex items-center gap-2 mt-5 mb-1">
-                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLOR[p[1]] }} />
-                              <span className="text-text-main font-bold text-xs uppercase tracking-wider">{p[2]}</span>
-                              <span className="text-xs text-text-hint">— {p[3]}</span>
-                            </div>
-                          );
-                        }
-                        if (line.startsWith("@F|")) {
-                          const p = line.split("|");
-                          return (
-                            <div key={li} className="flex items-center gap-2 mt-6 mb-2 pt-3 border-t border-border-main/30">
-                              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLOR[p[1]] }} />
-                              <span className="text-text-main font-bold text-xs uppercase tracking-wider">{p[2]}</span>
-                              <span className="text-text-main text-sm">—</span>
-                              <span className="text-text-main text-sm font-semibold">{p.slice(3).join("|")}</span>
-                            </div>
-                          );
-                        }
-                        if (line.startsWith("@L|"))
-                          return (
-                            <div key={li} className="pl-3 my-1">
-                              <span className="text-xs text-text-muted font-mono bg-bg3 rounded px-2 py-0.5 inline-flex items-center gap-1">Sección: «{line.slice(3)}»</span>
-                            </div>
-                          );
-                        if (line.startsWith("@D|"))
-                          return <p key={li} className="text-sm text-text-muted leading-relaxed pl-3 mb-1">{line.slice(3)}</p>;
-                        if (line.startsWith("@J|")) {
-                          const p = line.split("|");
-                          const idx = parseInt(p[1], 10);
-                          const label = p[2] || "Ir a la sección";
-                          return (
-                            <button
-                              key={li}
-                              onClick={() => scrollToSection(idx)}
-                              className="text-xs text-accent hover:text-accent-hover underline underline-offset-4 pl-3 mb-1 bg-transparent border-0 cursor-pointer font-mono text-left"
-                            >
-                              📍 Ir a «{label}»
-                            </button>
-                          );
-                        }
-                        if (line.startsWith("@M|"))
-                          return <p key={li} className="text-xs text-text-hint italic pl-3 mb-1">… y {line.slice(3)} más</p>;
-                        if (line.startsWith("@OK|"))
-                          return (
-                            <p key={li} className="text-sm text-text-muted pl-3 mb-0.5 flex items-center gap-1.5">
-                              <span className="text-teal">✓</span>{line.slice(4)}
-                            </p>
-                          );
-                        if (line.startsWith("@N|"))
-                          return <div key={li} className="mt-4 pt-3 border-t border-border-main/60 text-sm text-text-main leading-relaxed">{line.slice(3)}</div>;
-
-                        // Resumen del análisis
-                        if (t.startsWith("📋")) {
-                          return (
-                            <h3 key={li} className="text-text-main font-bold text-base mb-4 mt-0 border-b border-border-main/50 pb-2">
-                              {t.replace(/📋\s*/, "")}
-                            </h3>
-                          );
-                        }
-                        
-                        // Encabezados de severidad (Críticos, A corregir, Sugerencias)
-                        if (t.startsWith("🔴") || t.startsWith("🟡") || t.startsWith("🟢")) {
-                          const isHeader = t.includes("—") || t.includes("·");
-                          if (isHeader) {
-                            return (
-                              <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2 flex items-center gap-2">
-                                {t.replace(/\*\*/g, "")}
-                              </h4>
-                            );
-                          }
-                        }
-                        
-                        // Aspectos correctos
-                        if (t.startsWith("✅")) {
-                          return (
-                            <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2 flex items-center gap-2">
-                              {t}
-                            </h4>
-                          );
-                        }
-                        
-                        // Veredicto
-                        if (t.startsWith("**Veredicto") || t.match(/^\*\*.*\*\*/)) {
-                          return (
-                            <h4 key={li} className="text-text-main font-bold text-sm mt-5 mb-2">
-                              {t.replace(/\*\*/g, "")}
-                            </h4>
-                          );
-                        }
-                        
-                        // Subcategorías de error (ej: "  Error ortográfico · 40 casos")
-                        // Identificado porque empieza con espacios pero no es un ejemplo (no empieza con > ni •)
-                        if (raw.startsWith("  ") && !t.startsWith(">") && !t.startsWith("•")) {
-                          return (
-                            <p key={li} className="text-text-main font-semibold text-sm mt-3 mb-1 ml-4 uppercase tracking-wider">
-                              {t}
-                            </p>
-                          );
-                        }
-                        
-                        // Bloque de ejemplo de error (ej: "  > Posible error...")
-                        if (t.startsWith(">")) {
-                          return (
-                            <div key={li} className="bg-bg3 border-l-2 border-accent/40 py-1.5 px-3 my-1 ml-6 rounded-xs">
-                              <span className="text-text-muted text-sm italic font-mono block whitespace-normal">
-                                {t.replace(/^>\s*/, "")}
-                              </span>
-                            </div>
-                          );
-                        }
-                        
-                        // Lista de viñetas
-                        if (t.startsWith("•")) {
-                          return (
-                            <p key={li} className="text-text-muted text-sm mb-1 ml-6 flex items-start gap-1.5">
-                              <span>•</span>
-                              <span>{t.replace(/^•\s*/, "")}</span>
-                            </p>
-                          );
-                        }
-                        
-                        // Texto normal
-                        return (
-                          <p key={li} className="text-text-muted text-sm mb-1 ml-4">
-                            {t.replace(/\*\*/g, "")}
-                          </p>
-                        );
-                      })}
-                    </div>
+                    <AssistantMessageContent content={msg.contenido} animate={i === messages.length - 1} />
                   ) : (
                     msg.contenido
                   )}
@@ -774,7 +867,7 @@ export const Workspace: React.FC = () => {
               {normEvidencia && <span className="text-text-hint normal-case font-normal tracking-normal">· {normEvidencia.split(" · ")[1]}</span>}
             </span>
             <span className="inline-block text-[10px] text-text-hint bg-bg2 px-3 py-1.5 rounded-sm font-medium">
-              {config.carrera}
+              {detectedCarrera || config.carrera}
             </span>
             <div className="ml-auto flex items-center gap-2">
               {/* Zoom: agranda/achica SOLO el documento (sin tocar el resto de la app) */}
@@ -802,105 +895,63 @@ export const Workspace: React.FC = () => {
                 </button>
               </div>
 
-              {docxBuffer && (
+              {revision && revision.hallazgos.length > 0 && (
                 <div className="flex items-center gap-0.5 bg-bg2 rounded-sm p-0.5">
-                  <button
-                    onClick={() => setVista("fiel")}
-                    title="Ver el documento tal como se ve en Word"
-                    className={`px-3 py-1 rounded-xs text-[11px] transition-colors ${
-                      vista === "fiel" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-main"
-                    }`}
-                  >
-                    Fiel (Word)
-                  </button>
-                  <button
-                    onClick={() => setVista("marcado")}
-                    title="Ver el texto con los resaltados de cada indicador"
-                    className={`px-3 py-1 rounded-xs text-[11px] transition-colors ${
-                      vista === "marcado" ? "bg-accent/15 text-accent" : "text-text-muted hover:text-text-main"
-                    }`}
-                  >
-                    Marcado
-                  </button>
+                  <span className="px-3 py-1 rounded-xs text-[11px] text-accent inline-flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent/50" />
+                    {revision.hallazgos.length} hallazgo{revision.hallazgos.length > 1 ? "s" : ""}
+                  </span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Aviso de documento largo: el modelo solo vio el inicio; las reglas cubren todo el texto */}
-          {nota && (status === "success" || status === "partial") && (
-            <div className="mb-4 max-w-[980px] mx-auto px-5">
-              <div className="bg-info/10 border border-info/20 rounded-sm px-5 py-4 text-body text-text-muted flex items-start gap-3">
-                <IconInfoCircle size={18} className="text-info shrink-0 mt-0.5" />
-                <span>{nota}</span>
-              </div>
-            </div>
-          )}
-
           {/* `zoom` escala SOLO el documento (Fiel o Marcado); la barra y la UI no se tocan */}
           <div style={{ zoom }}>
-          {fiel ? (
-            /* ── VISTA FIEL: render real del .docx (docx-preview), solo lectura ── */
-            <div ref={docxRef} className="docx-host px-5 pb-12" />
-          ) : (
           <div className="pb-8 px-5 max-w-[860px] mx-auto">
             {documentText && (status === "success" || status === "partial") && (
               <div className="mb-10 doc-sheet select-text leading-relaxed">
                 {(() => {
                   const rev = revision;
-                  if (!rev || secciones.length === 0) {
-                    // Sin resaltados: render limpio (quita imágenes/links/{attrs} de pandoc).
-                    return renderMarkdown(documentText);
+                  if (!rev || rev.hallazgos.length === 0) {
+                    return renderMarkdown(documentText, undefined, undefined, undefined, true);
                   }
 
-                  // Build section segments with highlights
-                  const hIdx = new Set(
-                    rev.hallazgos
-                      .map(h => {
-                        if (!h.seccion) return -1;
-                        const n = normSec(h.seccion);
-                        return secciones.findIndex(s =>
-                          normSec(s.titulo).includes(n) || n.includes(normSec(s.titulo))
-                        );
-                      })
-                      .filter(i => i >= 0),
+                  // Build map of line → color per hallazgo severity
+                  const lines = documentText.split("\n");
+                  const hlLines = new Map<number, string>();
+                  const secIdxToLine: [number, number][] = [];
+
+                  for (const h of rev.hallazgos) {
+                    if (!h.seccion) continue;
+                    const secIdx = matchSeccion(h.seccion, secciones, documentText);
+                    const pos = findTextInDoc(documentText, h.seccion);
+                    if (pos < 0) continue;
+                    let lineIdx = 0;
+                    let acc = 0;
+                    for (let li = 0; li < lines.length; li++) {
+                      if (pos >= acc && pos < acc + lines[li].length + 1) {
+                        lineIdx = li;
+                        break;
+                      }
+                      acc += lines[li].length + 1;
+                    }
+                    const color = COLOR_SEV_HL[h.severidad] || "#e05555";
+                    const start = Math.max(0, lineIdx - 1);
+                    const end = Math.min(lines.length, lineIdx + 3);
+                    for (let li = start; li < end; li++) hlLines.set(li, color);
+                    if (secIdx >= 0) secIdxToLine.push([secIdx, lineIdx]);
+                  }
+
+                  return (
+                    <div>
+                      {renderMarkdown(documentText, hlLines, undefined, secIdxToLine, true)}
+                    </div>
                   );
-
-                  // Split text at section boundaries
-                  const sorted = [...secciones].sort((a, b) => a.inicio - b.inicio);
-                  const segments: { inicio: number; fin: number; highlight: boolean; idx: number }[] = [];
-                  let cursor = 0;
-                  for (const sec of sorted) {
-                    if (sec.inicio > cursor) {
-                      segments.push({ inicio: cursor, fin: sec.inicio, highlight: false, idx: -1 });
-                    }
-                    segments.push({ inicio: sec.inicio, fin: sec.fin, highlight: hIdx.has(sec.idx), idx: sec.idx });
-                    cursor = sec.fin;
-                  }
-                  if (cursor < documentText.length) {
-                    segments.push({ inicio: cursor, fin: documentText.length, highlight: false, idx: -1 });
-                  }
-
-                  return segments.map((seg, si) => {
-                    const text = documentText.slice(seg.inicio, seg.fin);
-                    if (seg.highlight) {
-                      return (
-                        <span
-                          key={si}
-                          id={`sec-${seg.idx}`}
-                          className="block border-l-2 border-accent/30 pl-3 -ml-3 scroll-mt-12"
-                        >
-                          {renderMarkdown(text)}
-                        </span>
-                      );
-                    }
-                    return <span key={si}>{renderMarkdown(text)}</span>;
-                  });
                 })()}
               </div>
             )}
           </div>
-          )}
           </div>
         </div>
       </div>

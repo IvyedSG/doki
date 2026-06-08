@@ -61,13 +61,14 @@ export const api = {
       signal,
     }),
 
-  // Convierte un .docx a Markdown limpio con pandoc (en el back). Texto canónico para vista +
-  // análisis: el modelo holístico lo evalúa bien (el markdown de mammoth lo hacía "resumir").
+  // Convierte cualquier formato soportado (.docx, .pdf, .pptx, .xlsx, .txt, .md, .html, etc.)
+  // a Markdown usando Microsoft MarkItDown en el backend.
   convertir: async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append("file", file);
     const res = await fetch(`${BASE_URL}/convertir`, {
       method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: await file.arrayBuffer(),
+      body: formData,
     });
     if (!res.ok) throw new ApiError(res.status, `Error ${res.status}`);
     const data = (await res.json()) as { markdown: string };
